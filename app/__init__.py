@@ -1,0 +1,1 @@
+"""GarbageTrack application package."""
