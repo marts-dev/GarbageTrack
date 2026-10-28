@@ -11,19 +11,83 @@ uv venv
 uv pip install -e ".[dev]"
 ```
 
+## Local MongoDB (testing)
+
+A self-contained `mongod` (v8.2.6, TCP on `127.0.0.1:27017`) lives in
+`tools/mongodb/` (binary, data dir, and logs; git-ignored):
+
+```bash
+./tools/mongodb/mongo.sh start    # start (fork) the instance
+./tools/mongodb/mongo.sh status   # check it reported ready
+./tools/mongodb/mongo.sh stop     # shut it down
+```
+
+Point the app at it with `MONGODB_URI=mongodb://127.0.0.1:27017` in `.env`
+(this overrides any Atlas `mongodb+srv://` URI for local testing).
+
 ## Run
 
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
+Interactive docs: `http://localhost:8000/docs`
+
+## API (v1)
+
 Health probes:
 
 - `GET /api/v1/health` — liveness, reports MongoDB reachability
 - `GET /api/v1/health/db` — readiness, pings MongoDB
 
+User locations (stored as GeoJSON Points with a `2dsphere` index for geospatial queries):
+
+- `PUT /api/v1/users/{user_id}/location` — save `{longitude, latitude}`
+- `GET /api/v1/users/{user_id}/location` — read saved location
+
+Garbage posts:
+
+- `POST /api/v1/garbage` — post garbage for collection; accepts multiple
+  `types` (`plastic`, `organic`, `paper`, `glass`, `metal`, `electronic`,
+  `hazardous`, `textile`, `general`) and an optional base64 `image_base64`
+  (≤5 MB decoded) with `image_content_type`
+- `GET /api/v1/garbage` — list posts; filter by `user_id`, `status`, or nearby
+  (`longitude`, `latitude`, `max_meters`)
+- `GET /api/v1/garbage/{post_id}` — read one post
+- `PATCH /api/v1/garbage/{post_id}/confirm-collected` — confirm collection
+  (404 unknown, 409 already collected)
+
+Trucks:
+
+- `POST /api/v1/trucks/schedules` — schedule a truck (plate number, garbage
+  types, status, current location, ETA, capacity)
+- `GET /api/v1/trucks/enroute` — view enroute trucks and the garbage types
+  each collects; optional nearby filter (`longitude`, `latitude`, `max_meters`)
+- `GET /api/v1/trucks/{truck_id}` — read one truck
+
+Collector API:
+
+- `GET /api/v1/trucks/{truck_id}/route` — nearest-first collection route
+  (`$geoNear`) filtered by the truck's garbage types (narrowable via `types`)
+  and limited to remaining capacity; stops include per-stop distances
+- `POST /api/v1/trucks/{truck_id}/collect-vicinity` — mark posted/scheduled
+  garbage within `radius_meters` (default 500) as collected; bumps the
+  truck's load and auto-marks it `full` at capacity
+- `PATCH /api/v1/trucks/{truck_id}/availability` — set `available`, `working`,
+  or `full` (returning to `available` resets the load)
+
+AI (placeholder):
+
+- `POST /api/v1/ai/classify` — suggest a garbage classification; currently
+  returns a stub marked `"placeholder": true`
+
 ## Test
 
 ```bash
 uv run pytest
+uv run ruff check app tests
 ```
+
+Endpoint tests run against an in-memory async fake (`tests/fakes.py`), so no
+live MongoDB is needed. Geospatial ordering (`$near`) is passed through to
+MongoDB and needs a real database to verify end to end.

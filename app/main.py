@@ -4,12 +4,13 @@ from fastapi import FastAPI
 
 from app.api.v1.router import router as api_v1_router
 from app.core.config import settings
-from app.core.database import close_mongo_connection, connect_to_mongo
+from app.core.database import close_mongo_connection, connect_to_mongo, ensure_indexes
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await connect_to_mongo()
+    client = await connect_to_mongo()
+    await ensure_indexes(client[settings.mongodb_db_name])
     yield
     await close_mongo_connection()
 

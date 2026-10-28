@@ -4,8 +4,10 @@ from fastapi.testclient import TestClient
 
 
 def test_liveness_reports_db_down_when_mongo_unreachable():
-    with patch("app.main.connect_to_mongo", new=AsyncMock()), patch(
-        "app.main.close_mongo_connection", new=AsyncMock()
+    with (
+        patch("app.main.connect_to_mongo", new=AsyncMock()),
+        patch("app.main.ensure_indexes", new=AsyncMock()),
+        patch("app.main.close_mongo_connection", new=AsyncMock()),
     ):
         from app.main import app
 
@@ -21,6 +23,7 @@ def test_liveness_reports_db_up_when_mongo_reachable():
     fake_client.admin.command = ping
     with (
         patch("app.main.connect_to_mongo", new=AsyncMock()),
+        patch("app.main.ensure_indexes", new=AsyncMock()),
         patch("app.main.close_mongo_connection", new=AsyncMock()),
         patch("app.api.v1.endpoints.health.database.get_client", return_value=fake_client),
     ):

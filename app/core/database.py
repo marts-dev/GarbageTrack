@@ -4,6 +4,9 @@ from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.core.config import settings
+from app.models import garbage as garbage_model
+from app.models import truck as truck_model
+from app.models import user as user_model
 
 _client: AsyncMongoClient | None = None
 
@@ -34,3 +37,13 @@ def get_client() -> AsyncMongoClient:
 def get_database() -> AsyncDatabase:
     """Return the application database handle."""
     return get_client()[settings.mongodb_db_name]
+
+
+async def ensure_indexes(db: AsyncDatabase) -> None:
+    """Create indexes required by the application (idempotent)."""
+    await db[user_model.COLLECTION].create_index("user_id", unique=True)
+    await db[user_model.COLLECTION].create_index([("location", "2dsphere")])
+    await db[garbage_model.COLLECTION].create_index([("location", "2dsphere")])
+    await db[garbage_model.COLLECTION].create_index("status")
+    await db[truck_model.COLLECTION].create_index("status")
+    await db[truck_model.COLLECTION].create_index([("current_location", "2dsphere")])
