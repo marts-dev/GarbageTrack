@@ -81,6 +81,22 @@ AI (placeholder):
 - `POST /api/v1/ai/classify` — suggest a garbage classification; currently
   returns a stub marked `"placeholder": true`
 
+Logistics:
+
+- `GET /api/v1/logistics/garbage` — view all posted garbage (filter by
+  `status`, `type`, `user_id`)
+- `GET /api/v1/logistics/garbage/summary` — totals by status and type
+- `GET /api/v1/logistics/trucks/locations` — view truck locations (filter by
+  `status`, `availability`)
+- `POST /api/v1/logistics/facilities` — register a `dump_site`, `recycling`,
+  or `waste_center` facility
+- `GET /api/v1/logistics/facilities` — list facilities (filter by `kind` or
+  nearby); `GET` one, `PATCH` to edit, `DELETE` to remove
+- `POST /api/v1/logistics/routes` — create a collection route for a truck:
+  pass explicit `post_ids`, or omit them to auto-generate from the truck's
+  route (type/capacity/proximity); assigned posts flip to `scheduled`
+- `GET /api/v1/logistics/routes` — list assigned routes (by `truck_id`/`status`)
+
 ## Test
 
 ```bash

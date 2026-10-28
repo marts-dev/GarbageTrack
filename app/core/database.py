@@ -4,7 +4,9 @@ from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.core.config import settings
+from app.models import facility as facility_model
 from app.models import garbage as garbage_model
+from app.models import route as route_model
 from app.models import truck as truck_model
 from app.models import user as user_model
 
@@ -47,3 +49,7 @@ async def ensure_indexes(db: AsyncDatabase) -> None:
     await db[garbage_model.COLLECTION].create_index("status")
     await db[truck_model.COLLECTION].create_index("status")
     await db[truck_model.COLLECTION].create_index([("current_location", "2dsphere")])
+    await db[facility_model.COLLECTION].create_index([("location", "2dsphere")])
+    await db[facility_model.COLLECTION].create_index("kind")
+    await db[route_model.COLLECTION].create_index("truck_id")
+    await db[route_model.COLLECTION].create_index("status")

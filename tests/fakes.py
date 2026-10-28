@@ -85,6 +85,13 @@ class FakeCollection:
             return SimpleNamespace(matched_count=0, modified_count=0, upserted_id=stored["_id"])
         return SimpleNamespace(matched_count=0, modified_count=0, upserted_id=None)
 
+    async def delete_one(self, query: dict) -> SimpleNamespace:
+        for key, doc in list(self.docs.items()):
+            if _matches(doc, query):
+                del self.docs[key]
+                return SimpleNamespace(deleted_count=1)
+        return SimpleNamespace(deleted_count=0)
+
     async def update_many(self, query: dict, update: dict) -> SimpleNamespace:
         matched = 0
         for doc in self.docs.values():

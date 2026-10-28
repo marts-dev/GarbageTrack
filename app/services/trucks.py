@@ -56,7 +56,7 @@ async def _get_truck_doc(db: AsyncDatabase, truck_id: str) -> dict:
     return doc
 
 
-def _resolve_origin(
+def resolve_origin(
     truck_doc: dict, longitude: float | None, latitude: float | None
 ) -> GeoPoint:
     if longitude is not None and latitude is not None:
@@ -129,7 +129,7 @@ async def get_collection_route(
     types: list | None = None,
 ) -> CollectionRouteResponse:
     truck_doc = await _get_truck_doc(db, truck_id)
-    origin = _resolve_origin(truck_doc, longitude, latitude)
+    origin = resolve_origin(truck_doc, longitude, latitude)
     capacity = truck_doc.get("capacity")
     load = truck_doc.get("load", 0)
     remaining = capacity - load if capacity is not None else None
@@ -176,7 +176,7 @@ async def collect_vicinity(
     db: AsyncDatabase, truck_id: str, payload: CollectVicinityRequest
 ) -> CollectVicinityResponse:
     truck_doc = await _get_truck_doc(db, truck_id)
-    origin = _resolve_origin(truck_doc, payload.longitude, payload.latitude)
+    origin = resolve_origin(truck_doc, payload.longitude, payload.latitude)
     wanted_types = _effective_types(truck_doc, payload.types)
 
     post_ids: list[str] = []
