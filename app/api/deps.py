@@ -48,7 +48,7 @@ CurrentUser = Annotated[UserResponse, Depends(get_current_user)]
 
 def require_roles(*roles: Role):
     async def checker(user: CurrentUser) -> UserResponse:
-        if Role.ADMIN in user.roles or any(role in user.roles for role in roles):
+        if user.role == Role.ADMIN or user.role in roles:
             return user
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
 
@@ -56,4 +56,4 @@ def require_roles(*roles: Role):
 
 
 def is_self_or_admin(user: UserResponse, user_id: str) -> bool:
-    return Role.ADMIN in user.roles or user.id == user_id
+    return user.role == Role.ADMIN or user.id == user_id

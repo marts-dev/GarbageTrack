@@ -19,11 +19,19 @@ async def lifespan(app: FastAPI):
     await close_mongo_connection()
 
 
+def cors_options() -> dict:
+    """CORS settings. Local dev (DEBUG) allows any origin since `flutter run`
+    serves the web app on a random port; the app sends no cookies, so
+    credentialed CORS is unnecessary there."""
+    if settings.debug:
+        return {"allow_origins": ["*"], "allow_credentials": False}
+    return {"allow_origins": settings.cors_origins, "allow_credentials": True}
+
+
 app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
+    **cors_options(),
     allow_methods=["*"],
     allow_headers=["*"],
 )

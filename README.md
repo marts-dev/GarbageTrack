@@ -33,6 +33,12 @@ uv run uvicorn app.main:app --reload
 
 Interactive docs: `http://localhost:8000/docs`
 
+## Mobile + web app
+
+Flutter front-end lives in [`mobile/`](mobile/) (Android and web, Material 3).
+See [`mobile/README.md`](mobile/README.md) for run/build instructions — it
+covers auth, resident, collector, logistics, and admin flows.
+
 ## Auth
 
 OAuth2 password flow with JWT (HS256 access tokens, 30 min) plus rotating
@@ -40,10 +46,11 @@ refresh tokens (7 days). Passwords are bcrypt-hashed (12 rounds); the app
 refuses to start with a `JWT_SECRET_KEY` shorter than 32 bytes.
 
 ```bash
-# register (roles: resident, collector, logistics; admin is never self-granted)
+# register (role defaults to resident; admin is never self-granted)
 curl -X POST localhost:8000/api/v1/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"me@example.com","password":"Password123"}'
+# optional fields: "full_name", "role": resident | collector | logistics
 # login (form fields, like the docs' Authorize button)
 curl -X POST localhost:8000/api/v1/auth/login \
   -d 'username=me@example.com&password=Password123'
@@ -51,8 +58,9 @@ curl -X POST localhost:8000/api/v1/auth/login \
 ```
 
 Set `ADMIN_EMAIL`/`ADMIN_PASSWORD` in `.env` to seed an ops admin on first
-boot (only when no users exist). Admins manage roles via
-`GET/PATCH /api/v1/auth/users…`.
+boot (only when no users exist). Admins manage the user role via
+`GET /api/v1/auth/users` and `PATCH /api/v1/auth/users/{id}/role`; users edit
+their own display name with `PATCH /api/v1/auth/me`.
 
 Role map: residents use locations/garbage/AI and confirm their own posts;
 `collector` unlocks truck route/collect/availability and confirming any post;

@@ -11,7 +11,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=72)
     full_name: str | None = None
-    roles: list[Role] = Field(default_factory=lambda: [Role.RESIDENT], min_length=1)
+    role: Role = Role.RESIDENT
 
 
 class TokenResponse(BaseModel):
@@ -28,10 +28,14 @@ class UserResponse(BaseModel):
     id: str
     email: str
     full_name: str | None
-    roles: list[Role]
+    role: Role
     is_active: bool
     created_at: datetime
 
 
 class RoleUpdateRequest(BaseModel):
-    roles: list[Role] = Field(min_length=1)
+    role: Role
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: str = Field(min_length=1, max_length=100)

@@ -19,7 +19,7 @@ OPERATIONAL_ROLES = {Role.COLLECTOR, Role.LOGISTICS, Role.ADMIN}
 
 @router.post("", response_model=GarbagePostResponse, status_code=status.HTTP_201_CREATED)
 async def create_post(payload: GarbagePostCreate, user: CurrentUser, db: Db):
-    if payload.user_id != user.id and Role.ADMIN not in user.roles:
+    if payload.user_id != user.id and user.role != Role.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="can only post as yourself"
         )
@@ -56,7 +56,7 @@ async def confirm_collected(post_id: str, user: CurrentUser, db: Db):
         post = await garbage_service.get_post(db, post_id)
     except GarbagePostNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="garbage post not found") from None
-    if post.user_id != user.id and not (set(user.roles) & OPERATIONAL_ROLES):
+    if post.user_id != user.id and user.role not in OPERATIONAL_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="only the owner or operations can confirm"
         )

@@ -24,11 +24,13 @@ class InvalidCredentialsError(Exception):
 
 
 def _to_response(doc: dict) -> UserResponse:
+    # Tolerate pre-migration documents that stored a roles list.
+    role = doc.get("role") or (doc.get("roles") or [Role.RESIDENT.value])[0]
     return UserResponse(
         id=str(doc["_id"]),
         email=doc["email"],
         full_name=doc.get("full_name"),
-        roles=doc["roles"],
+        role=role,
         is_active=doc.get("is_active", True),
         created_at=doc["created_at"],
     )
@@ -38,7 +40,7 @@ async def create_user(
     db: AsyncDatabase,
     email: str,
     password: str,
-    roles: list[Role],
+    role: Role,
     full_name: str | None = None,
 ) -> UserResponse:
     normalized = email.strip().lower()
@@ -49,7 +51,7 @@ async def create_user(
         email=normalized,
         hashed_password=security.hash_password(password),
         full_name=full_name,
-        roles=roles,
+        role=role,
     )
     stored = doc.model_dump(by_alias=True, exclude={"id"})
     result = await db[auth_model.COLLECTION].insert_one(stored)
@@ -82,17 +84,32 @@ async def list_users(db: AsyncDatabase, limit: int = 100) -> list[UserResponse]:
     return [_to_response(doc) async for doc in cursor]
 
 
-async def update_user_roles(db: AsyncDatabase, user_id: str, roles: list[Role]) -> UserResponse:
+async def update_user_role(db: AsyncDatabase, user_id: str, role: Role) -> UserResponse:
     try:
         object_id = ObjectId(user_id)
     except InvalidId as exc:
         raise UserNotFoundError(user_id) from exc
     stored = await db[auth_model.COLLECTION].find_one_and_update(
-        {"_id": object_id}, {"$set": {"roles": [role.value for role in roles]}}
+        {"_id": object_id}, {"$set": {"role": role.value}, "$unset": {"roles": ""}}
     )
     if stored is None:
         raise UserNotFoundError(user_id)
-    stored["roles"] = roles
+    stored["role"] = role
+    stored.pop("roles", None)
+    return _to_response(stored)
+
+
+async def update_profile(db: AsyncDatabase, user_id: str, full_name: str) -> UserResponse:
+    try:
+        object_id = ObjectId(user_id)
+    except InvalidId as exc:
+        raise UserNotFoundError(user_id) from exc
+    stored = await db[auth_model.COLLECTION].find_one_and_update(
+        {"_id": object_id}, {"$set": {"full_name": full_name}}
+    )
+    if stored is None:
+        raise UserNotFoundError(user_id)
+    stored["full_name"] = full_name
     return _to_response(stored)
 
 
@@ -107,6 +124,6 @@ async def ensure_default_admin(db: AsyncDatabase) -> None:
         db,
         email=settings.admin_email,
         password=settings.admin_password,
-        roles=[Role.ADMIN],
+        role=Role.ADMIN,
         full_name="Administrator",
     )

@@ -21,6 +21,6 @@ class UserDocument(MongoDocument):
     email: str
     hashed_password: str
     full_name: str | None = None
-    roles: list[Role] = Field(min_length=1)
+    role: Role
     is_active: bool = True
     created_at: datetime = Field(default_factory=utcnow)
