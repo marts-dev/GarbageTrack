@@ -1,10 +1,11 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pymongo.asynchronous.database import AsyncDatabase
 
-from app.api.deps import get_db
+from app.api.deps import CurrentUser, Db, require_roles
+from app.models.auth import Role
 from app.models.garbage import GarbageType
+from app.schemas.auth import UserResponse
 from app.schemas.trucks import (
     AvailabilityUpdate,
     CollectionRouteResponse,
@@ -18,29 +19,34 @@ from app.services.trucks import TruckLocationUnknownError, TruckNotFoundError
 
 router = APIRouter(prefix="/trucks", tags=["trucks"])
 
-Db = Annotated[AsyncDatabase, Depends(get_db)]
 Longitude = Annotated[float | None, Query(ge=-180, le=180)]
 Latitude = Annotated[float | None, Query(ge=-90, le=90)]
+Collector = Annotated[UserResponse, Depends(require_roles(Role.COLLECTOR, Role.LOGISTICS))]
+Dispatcher = Annotated[UserResponse, Depends(require_roles(Role.LOGISTICS))]
 
 
 @router.post("/schedules", response_model=TruckResponse, status_code=status.HTTP_201_CREATED)
-async def create_schedule(payload: TruckScheduleCreate, db: Db):
+async def create_schedule(payload: TruckScheduleCreate, user: Dispatcher, db: Db):
+    _ = user
     return await trucks_service.create_schedule(db, payload)
 
 
 @router.get("/enroute", response_model=list[TruckResponse])
 async def list_enroute(
+    user: CurrentUser,
     db: Db,
     longitude: Longitude = None,
     latitude: Latitude = None,
     max_meters: Annotated[float, Query(gt=0)] = 10000,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ):
+    _ = user
     return await trucks_service.list_enroute(db, longitude, latitude, max_meters, limit)
 
 
 @router.get("/{truck_id}", response_model=TruckResponse)
-async def read_truck(truck_id: str, db: Db):
+async def read_truck(truck_id: str, user: Collector, db: Db):
+    _ = user
     try:
         return await trucks_service.get_truck(db, truck_id)
     except TruckNotFoundError:
@@ -50,6 +56,7 @@ async def read_truck(truck_id: str, db: Db):
 @router.get("/{truck_id}/route", response_model=CollectionRouteResponse)
 async def read_collection_route(
     truck_id: str,
+    user: Collector,
     db: Db,
     longitude: Longitude = None,
     latitude: Latitude = None,
@@ -57,6 +64,7 @@ async def read_collection_route(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     types: Annotated[list[GarbageType] | None, Query()] = None,
 ):
+    _ = user
     try:
         return await trucks_service.get_collection_route(
             db, truck_id, longitude, latitude, max_meters, limit, types
@@ -68,7 +76,8 @@ async def read_collection_route(
 
 
 @router.post("/{truck_id}/collect-vicinity", response_model=CollectVicinityResponse)
-async def collect_vicinity(truck_id: str, payload: CollectVicinityRequest, db: Db):
+async def collect_vicinity(truck_id: str, payload: CollectVicinityRequest, user: Collector, db: Db):
+    _ = user
     try:
         return await trucks_service.collect_vicinity(db, truck_id, payload)
     except TruckNotFoundError:
@@ -78,7 +87,8 @@ async def collect_vicinity(truck_id: str, payload: CollectVicinityRequest, db: D
 
 
 @router.patch("/{truck_id}/availability", response_model=TruckResponse)
-async def update_availability(truck_id: str, payload: AvailabilityUpdate, db: Db):
+async def update_availability(truck_id: str, payload: AvailabilityUpdate, user: Collector, db: Db):
+    _ = user
     try:
         return await trucks_service.set_availability(db, truck_id, payload.availability)
     except TruckNotFoundError:

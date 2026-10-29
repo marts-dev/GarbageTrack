@@ -33,6 +33,32 @@ uv run uvicorn app.main:app --reload
 
 Interactive docs: `http://localhost:8000/docs`
 
+## Auth
+
+OAuth2 password flow with JWT (HS256 access tokens, 30 min) plus rotating
+refresh tokens (7 days). Passwords are bcrypt-hashed (12 rounds); the app
+refuses to start with a `JWT_SECRET_KEY` shorter than 32 bytes.
+
+```bash
+# register (roles: resident, collector, logistics; admin is never self-granted)
+curl -X POST localhost:8000/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"me@example.com","password":"Password123"}'
+# login (form fields, like the docs' Authorize button)
+curl -X POST localhost:8000/api/v1/auth/login \
+  -d 'username=me@example.com&password=Password123'
+# then: -H "Authorization: Bearer <access_token>"
+```
+
+Set `ADMIN_EMAIL`/`ADMIN_PASSWORD` in `.env` to seed an ops admin on first
+boot (only when no users exist). Admins manage roles via
+`GET/PATCH /api/v1/auth/users…`.
+
+Role map: residents use locations/garbage/AI and confirm their own posts;
+`collector` unlocks truck route/collect/availability and confirming any post;
+`logistics` unlocks truck scheduling and the logistics router; `admin` bypasses
+all role checks. Health probes stay public.
+
 ## API (v1)
 
 Health probes:
