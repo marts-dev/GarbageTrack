@@ -57,3 +57,12 @@ dart run tool/live_check.dart      # expects the API at 127.0.0.1:8000
 - `lib/screens/` — login/register, resident home (location, reports, enroute
   trucks, classifier), collector (truck routes, vicinity collect, status),
   logistics (overview, trucks, facilities CRUD, route assignment), admin users
+- `lib/theme/` — centralized light/dark Material 3 theme (green seed)
+- `lib/widgets/geo_map.dart` — reusable read-only OpenStreetMap view
+  (`GarbageMapView`: markers, route polylines, OSM attribution)
+- `lib/widgets/location_picker.dart` — tap-to-pick map picker with GPS button
+  (`LocationMapPicker`), used by every location form
+- `lib/utils/geo.dart` — GeoPoint (GeoJSON lon/lat) <-> LatLng conversions
+
+Map tiles come from OpenStreetMap contributors; every map shows the required
+attribution. Keep it visible to comply with the OSM tile usage policy.

@@ -46,7 +46,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(BottomNavigationBar), findsNothing);
+    expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('Hello, Test User'), findsOneWidget);
     expect(find.text('Resident'), findsOneWidget);
   });
@@ -77,7 +77,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byType(BottomNavigationBar), findsOneWidget);
+    expect(find.byType(NavigationBar), findsOneWidget);
     for (final label in ['Home', 'Collect', 'Logistics', 'Users']) {
       expect(find.text(label), findsOneWidget);
     }

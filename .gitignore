@@ -14,7 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# NB: root-scoped — a bare lib/ rule would also ignore mobile/lib (Flutter sources).
+/lib/
 lib64/
 parts/
 sdist/

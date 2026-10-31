@@ -5,6 +5,8 @@
     <!-- GPS position for reports and truck vicinity. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- OSM map tiles and API traffic (release builds). -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Dev only: allow plain-http API during local development. Serve the
          API over https and remove this for production. -->
     <application
