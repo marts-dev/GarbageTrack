@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/models.dart';
+import 'type_dots.dart';
 
 /// GPS button plus manual longitude/latitude fields. Reports a valid point
 /// through [onChanged] whenever either source produces one.
@@ -132,6 +133,7 @@ class GarbageTypePicker extends StatelessWidget {
       children: [
         for (final type in garbageTypes)
           FilterChip(
+            avatar: TypeDot(type),
             label: Text(pretty(type)),
             selected: selected.contains(type),
             onSelected: (on) {

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/country_viewports.dart';
 import '../widgets/async_view.dart';
 import '../widgets/inputs.dart';
 import '../widgets/location_picker.dart';
@@ -91,6 +92,8 @@ class _FacilityFormScreenState extends State<FacilityFormScreen> {
   @override
   Widget build(BuildContext context) {
     final editing = widget.existing != null;
+    final viewport =
+        viewportFor(context.watch<AuthProvider>().country);
     return Scaffold(
       appBar: AppBar(title: Text(editing ? 'Edit facility' : 'New facility')),
       body: Form(
@@ -168,6 +171,8 @@ class _FacilityFormScreenState extends State<FacilityFormScreen> {
                     LocationMapPicker(
                       initial: _point,
                       onChanged: (point) => setState(() => _point = point),
+                      fallbackCenter: viewport.center,
+                      fallbackZoom: viewport.zoom,
                     ),
                   ],
                 ),

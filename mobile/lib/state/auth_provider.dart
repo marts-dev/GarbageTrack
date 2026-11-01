@@ -56,6 +56,9 @@ class AuthProvider extends ChangeNotifier {
   bool _ready = false;
 
   User? get user => _user;
+
+  /// Signed-in user's country, used for map defaults and route scoping.
+  String? get country => _user?.country;
   bool get isAuthenticated => _user != null;
   bool get isBusy => _busy;
   bool get isReady => _ready;
@@ -118,13 +121,15 @@ class AuthProvider extends ChangeNotifier {
   Future<void> register({
     required String email,
     required String password,
+    required String country,
     String? fullName,
     String role = 'resident',
   }) async {
     _busy = true;
     notifyListeners();
     try {
-      await auth.register(email: email, password: password, fullName: fullName, role: role);
+      await auth.register(
+          email: email, password: password, country: country, fullName: fullName, role: role);
       final tokens = await auth.login(email: email, password: password);
       _tokens = tokens;
       final user = await auth.me();

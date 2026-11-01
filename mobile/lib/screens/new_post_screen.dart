@@ -3,17 +3,22 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/country_viewports.dart';
 import '../widgets/async_view.dart';
 import '../widgets/inputs.dart';
 import '../widgets/location_picker.dart';
 
 class NewPostScreen extends StatefulWidget {
-  const NewPostScreen({super.key});
+  const NewPostScreen({super.key, this.tileProvider});
+
+  /// Overrides tile loading (e.g. an offline stub in widget tests).
+  final TileProvider? tileProvider;
 
   @override
   State<NewPostScreen> createState() => _NewPostScreenState();
@@ -21,6 +26,7 @@ class NewPostScreen extends StatefulWidget {
 
 class _NewPostScreenState extends State<NewPostScreen> {
   final _description = TextEditingController();
+  final _district = TextEditingController();
   final _types = <String>{};
   GeoPoint? _point;
   Uint8List? _imageBytes;
@@ -30,6 +36,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
   @override
   void dispose() {
     _description.dispose();
+    _district.dispose();
     super.dispose();
   }
 
@@ -54,15 +61,20 @@ class _NewPostScreenState extends State<NewPostScreen> {
   Future<void> _submit() async {
     final point = _point;
     if (point == null || _types.isEmpty) return;
+    final auth = context.read<AuthProvider>();
+    if (auth.user?.isResident != true) {
+      if (mounted) showError(context, 'Only residents can report garbage');
+      return;
+    }
     setState(() => _busy = true);
     try {
-      final auth = context.read<AuthProvider>();
       await auth.garbage.createPost(
         userId: auth.user!.id,
         longitude: point.longitude,
         latitude: point.latitude,
         types: _types.toList(),
         description: _description.text.trim().isEmpty ? null : _description.text.trim(),
+        district: _district.text.trim().isEmpty ? null : _district.text.trim(),
         imageBase64: _imageBytes == null ? null : base64Encode(_imageBytes!),
         imageContentType: _imageBytes == null ? null : _imageMime,
       );
@@ -79,6 +91,19 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    if (auth.user?.isResident != true) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Report garbage')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(32),
+            child: Text('Only residents can report garbage.'),
+          ),
+        ),
+      );
+    }
+    final viewport = viewportFor(auth.country);
     final canSubmit = _point != null && _types.isNotEmpty && !_busy;
     return Scaffold(
       appBar: AppBar(title: const Text('Report garbage')),
@@ -95,7 +120,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   Text('Where is it?', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
                   LocationMapPicker(
-                      onChanged: (point) => setState(() => _point = point)),
+                    onChanged: (point) => setState(() => _point = point),
+                    fallbackCenter: viewport.center,
+                    fallbackZoom: viewport.zoom,
+                    tileProvider: widget.tileProvider,
+                  ),
                 ],
               ),
             ),
@@ -117,6 +146,15 @@ class _NewPostScreenState extends State<NewPostScreen> {
                         ..clear()
                         ..addAll(next))),
                   const SizedBox(height: 16),
+                  TextField(
+                    controller: _district,
+                    maxLength: 120,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'District / region (optional)',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   TextField(
                     controller: _description,
                     maxLines: 3,

@@ -47,6 +47,24 @@ class GeoPoint {
   String get short => '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}';
 }
 
+/// Parses a GeoJSON LineString geometry (`{"type": "LineString",
+/// "coordinates": [[lon, lat], ...]}`) into points. Returns null for
+/// missing/null/empty shapes so legacy payloads keep parsing.
+List<GeoPoint>? lineStringFromJson(Object? json) {
+  if (json is! Map) return null;
+  final coords = json['coordinates'];
+  if (coords is! List || coords.isEmpty) return null;
+  final points = <GeoPoint>[];
+  for (final pair in coords) {
+    if (pair is! List || pair.length < 2) return null;
+    final lon = (pair[0] as num?)?.toDouble();
+    final lat = (pair[1] as num?)?.toDouble();
+    if (lon == null || lat == null) return null;
+    points.add(GeoPoint(longitude: lon, latitude: lat));
+  }
+  return points;
+}
+
 class User {
   final String id;
   final String email;
@@ -54,12 +72,17 @@ class User {
   final String role;
   final bool isActive;
 
+  /// Free-text country from registration. Nullable so legacy accounts
+  /// created before the field existed keep parsing.
+  final String? country;
+
   User({
     required this.id,
     required this.email,
     required this.role,
     required this.isActive,
     this.fullName,
+    this.country,
   });
 
   factory User.fromJson(Map<String, dynamic> json) => User(
@@ -68,11 +91,16 @@ class User {
         fullName: json['full_name'] as String?,
         role: json['role'] as String,
         isActive: json['is_active'] as bool? ?? true,
+        country: json['country'] as String?,
       );
 
   bool get isAdmin => role == 'admin';
   bool get isCollector => isAdmin || role == 'collector';
   bool get isLogistics => isAdmin || role == 'logistics';
+
+  /// Only residents may report garbage; every other role (including admin)
+  /// is blocked by the API and hidden in the UI.
+  bool get isResident => role == 'resident';
 
   /// Greeting name: the user's fullName, or the capitalized role when empty.
   String get displayName {
@@ -114,6 +142,9 @@ class GarbagePost {
   final GeoPoint location;
   final List<String> types;
   final String? description;
+
+  /// Resident-entered district/region text, optional at posting time.
+  final String? district;
   final bool hasImage;
   final String? imageContentType;
   final String status;
@@ -128,6 +159,7 @@ class GarbagePost {
     required this.status,
     required this.createdAt,
     this.description,
+    this.district,
     required this.hasImage,
     this.imageContentType,
     this.collectedAt,
@@ -139,6 +171,7 @@ class GarbagePost {
         location: GeoPoint.fromJson(json['location'] as Map<String, dynamic>),
         types: (json['types'] as List).map((e) => e as String).toList(),
         description: json['description'] as String?,
+        district: json['district'] as String?,
         hasImage: json['has_image'] as bool? ?? false,
         imageContentType: json['image_content_type'] as String?,
         status: json['status'] as String,
@@ -160,6 +193,11 @@ class Truck {
   final int? capacity;
   final int load;
 
+  /// Id of the collector assigned as this truck's operator, or null when
+  /// unassigned. Set only by logistics/admin; nullable so legacy payloads
+  /// without the operator field keep parsing.
+  final String? operatorId;
+
   Truck({
     required this.id,
     required this.plateNumber,
@@ -170,6 +208,7 @@ class Truck {
     this.currentLocation,
     this.etaMinutes,
     this.capacity,
+    this.operatorId,
   });
 
   factory Truck.fromJson(Map<String, dynamic> json) => Truck(
@@ -185,9 +224,14 @@ class Truck {
         etaMinutes: (json['eta_minutes'] as num?)?.toInt(),
         capacity: (json['capacity'] as num?)?.toInt(),
         load: (json['load'] as num?)?.toInt() ?? 0,
+        operatorId: json['operator_id'] as String?,
       );
 
   int? get remainingCapacity => capacity == null ? null : capacity! - load;
+
+  bool get isAssigned => operatorId != null;
+
+  bool isOperatedBy(String userId) => operatorId == userId;
 }
 
 class RouteStop {
@@ -220,11 +264,20 @@ class CollectionRoute {
   final int? remainingCapacity;
   final List<RouteStop> stops;
 
+  /// Road-following path (origin -> stops -> depot end when present).
+  /// Null on legacy payloads; callers fall back to straight lines.
+  final List<GeoPoint>? geometry;
+
+  /// How [geometry] was built: 'road' or 'straight'.
+  final String geometrySource;
+
   CollectionRoute({
     required this.truckId,
     required this.origin,
     required this.stops,
     this.remainingCapacity,
+    this.geometry,
+    this.geometrySource = 'straight',
   });
 
   factory CollectionRoute.fromJson(Map<String, dynamic> json) => CollectionRoute(
@@ -234,7 +287,14 @@ class CollectionRoute {
         stops: (json['stops'] as List)
             .map((e) => RouteStop.fromJson(e as Map<String, dynamic>))
             .toList(),
+        geometry: lineStringFromJson(json['geometry']),
+        geometrySource: json['geometry_source'] as String? ?? 'straight',
       );
+
+  /// Points to draw: road geometry when usable, else origin + stops.
+  List<GeoPoint> get displayLine => (geometry != null && geometry!.length >= 2)
+      ? geometry!
+      : [origin, for (final stop in stops) stop.location];
 }
 
 class CollectResult {
@@ -321,6 +381,19 @@ class PlannedRoute {
   final List<PlannedStop> stops;
   final String status;
 
+  /// Facility ids used as depots for this route (all facility kinds).
+  final List<String> depotIds;
+
+  /// Logistics-placed collection points, tapped on the map at creation.
+  final List<GeoPoint> collectionPoints;
+
+  /// Road-following path (origin -> stops -> first-depot end).
+  /// Null on legacy payloads; callers fall back to straight lines.
+  final List<GeoPoint>? geometry;
+
+  /// How [geometry] was built: 'road' or 'straight'.
+  final String geometrySource;
+
   PlannedRoute({
     required this.id,
     required this.truckId,
@@ -328,6 +401,10 @@ class PlannedRoute {
     required this.stops,
     required this.status,
     this.name,
+    this.depotIds = const [],
+    this.collectionPoints = const [],
+    this.geometry,
+    this.geometrySource = 'straight',
   });
 
   factory PlannedRoute.fromJson(Map<String, dynamic> json) => PlannedRoute(
@@ -339,7 +416,22 @@ class PlannedRoute {
             .map((e) => PlannedStop.fromJson(e as Map<String, dynamic>))
             .toList(),
         status: json['status'] as String,
+        depotIds: (json['depot_ids'] as List?)
+                ?.map((e) => e as String)
+                .toList() ??
+            const [],
+        collectionPoints: (json['collection_points'] as List?)
+                ?.map((e) => GeoPoint.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
+        geometry: lineStringFromJson(json['geometry']),
+        geometrySource: json['geometry_source'] as String? ?? 'straight',
       );
+
+  /// Points to draw: road geometry when usable, else origin + stops.
+  List<GeoPoint> get displayLine => (geometry != null && geometry!.length >= 2)
+      ? geometry!
+      : [origin, for (final stop in stops) stop.location];
 }
 
 class GarbageSummary {

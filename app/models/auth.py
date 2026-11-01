@@ -22,5 +22,6 @@ class UserDocument(MongoDocument):
     hashed_password: str
     full_name: str | None = None
     role: Role
+    country: str | None = None
     is_active: bool = True
     created_at: datetime = Field(default_factory=utcnow)

@@ -13,3 +13,35 @@ extension GeoPointLatLng on GeoPoint {
 extension LatLngGeoPoint on LatLng {
   GeoPoint get geoPoint => GeoPoint(longitude: longitude, latitude: latitude);
 }
+
+/// Ray-casting point-in-polygon test (longitude = x, latitude = y).
+///
+/// Returns true for points strictly inside [ring] and for points on an edge
+/// or vertex. Rings with fewer than 3 vertices never contain anything; the
+/// ring is treated as implicitly closed.
+bool pointInPolygon(GeoPoint point, List<GeoPoint> ring) {
+  if (ring.length < 3) return false;
+  final x = point.longitude;
+  final y = point.latitude;
+  var inside = false;
+  for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    final xi = ring[i].longitude;
+    final yi = ring[i].latitude;
+    final xj = ring[j].longitude;
+    final yj = ring[j].latitude;
+    // On-segment check so boundary points count as enclosed.
+    final cross = (y - yi) * (xj - xi) - (x - xi) * (yj - yi);
+    if (cross == 0 &&
+        x >= (xi < xj ? xi : xj) &&
+        x <= (xi > xj ? xi : xj) &&
+        y >= (yi < yj ? yi : yj) &&
+        y <= (yi > yj ? yi : yj)) {
+      return true;
+    }
+    if ((yi > y) != (yj > y)) {
+      final intersectX = xi + (xj - xi) * (y - yi) / (yj - yi);
+      if (x < intersectX) inside = !inside;
+    }
+  }
+  return inside;
+}

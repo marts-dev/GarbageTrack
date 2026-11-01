@@ -48,6 +48,33 @@ void main() {
     });
     expect(truck.remainingCapacity, 6);
     expect(truck.currentLocation, isNull);
+    expect(truck.operatorId, isNull);
+    expect(truck.isAssigned, isFalse);
+  });
+
+  test('Truck parses operator_id and tolerates legacy payloads', () {
+    Map<String, dynamic> payload({Object? operatorId = 'missing'}) => {
+          'id': 't1',
+          'plate_number': 'ABC-123',
+          'status': 'scheduled',
+          'availability': 'available',
+          'garbage_types': ['plastic'],
+          'current_location': null,
+          'eta_minutes': null,
+          'capacity': null,
+          'load': 0,
+          if (operatorId != 'missing') 'operator_id': operatorId,
+          'created_at': '2026-10-29T00:00:00Z',
+        };
+    final assigned = Truck.fromJson(payload(operatorId: 'u1'));
+    expect(assigned.operatorId, 'u1');
+    expect(assigned.isAssigned, isTrue);
+    expect(assigned.isOperatedBy('u1'), isTrue);
+    expect(assigned.isOperatedBy('u2'), isFalse);
+
+    final legacy = Truck.fromJson(payload());
+    expect(legacy.operatorId, isNull);
+    expect(legacy.isAssigned, isFalse);
   });
 
   test('CollectionRoute parses stops with distances', () {
@@ -139,5 +166,114 @@ void main() {
   test('pretty formats snake_case labels', () {
     expect(pretty('dump_site'), 'Dump Site');
     expect(pretty('enroute'), 'Enroute');
+  });
+
+  test('User parses country and tolerates legacy null', () {
+    final withCountry = User.fromJson({
+      'id': 'u1',
+      'email': 'r@x.com',
+      'full_name': null,
+      'role': 'resident',
+      'is_active': true,
+      'country': 'Nigeria',
+    });
+    expect(withCountry.country, 'Nigeria');
+
+    final legacy = User.fromJson({
+      'id': 'u2',
+      'email': 'old@x.com',
+      'full_name': null,
+      'role': 'resident',
+      'is_active': true,
+      'country': null,
+    });
+    expect(legacy.country, isNull);
+
+    final missingKey = User.fromJson({
+      'id': 'u3',
+      'email': 'older@x.com',
+      'full_name': null,
+      'role': 'resident',
+      'is_active': true,
+    });
+    expect(missingKey.country, isNull);
+  });
+
+  test('isResident is true only for residents', () {
+    User userWith(String role) => User(
+          id: 'u1',
+          email: 'u@x.com',
+          role: role,
+          isActive: true,
+        );
+    expect(userWith('resident').isResident, isTrue);
+    expect(userWith('collector').isResident, isFalse);
+    expect(userWith('logistics').isResident, isFalse);
+    expect(userWith('admin').isResident, isFalse);
+  });
+
+  test('GarbagePost parses district, null, and missing key', () {
+    GarbagePost postWith(Object? district, {bool includeKey = true}) =>
+        GarbagePost.fromJson({
+          'id': 'p1',
+          'user_id': 'u1',
+          'location': {
+            'type': 'Point',
+            'coordinates': [3.37, 6.45]
+          },
+          'types': ['plastic'],
+          'description': null,
+          if (includeKey) 'district': district,
+          'has_image': false,
+          'image_content_type': null,
+          'status': 'posted',
+          'created_at': '2026-10-29T00:00:00Z',
+          'collected_at': null,
+        });
+    expect(postWith('Ojota').district, 'Ojota');
+    expect(postWith(null).district, isNull);
+    expect(postWith(null, includeKey: false).district, isNull);
+  });
+
+  test('PlannedRoute parses depot_ids and collection_points', () {
+    final route = PlannedRoute.fromJson({
+      'id': 'r1',
+      'truck_id': 't1',
+      'name': 'Morning run',
+      'origin': {
+        'type': 'Point',
+        'coordinates': [3.37, 6.45]
+      },
+      'stops': [],
+      'status': 'assigned',
+      'created_at': '2026-10-29T00:00:00Z',
+      'depot_ids': ['f1', 'f2'],
+      'collection_points': [
+        {
+          'type': 'Point',
+          'coordinates': [3.38, 6.46]
+        },
+      ],
+    });
+    expect(route.depotIds, ['f1', 'f2']);
+    expect(route.collectionPoints, hasLength(1));
+    expect(route.collectionPoints.first.short, '6.4600, 3.3800');
+  });
+
+  test('PlannedRoute defaults missing depot/point keys to empty', () {
+    final route = PlannedRoute.fromJson({
+      'id': 'r1',
+      'truck_id': 't1',
+      'name': null,
+      'origin': {
+        'type': 'Point',
+        'coordinates': [3.37, 6.45]
+      },
+      'stops': [],
+      'status': 'assigned',
+      'created_at': '2026-10-29T00:00:00Z',
+    });
+    expect(route.depotIds, isEmpty);
+    expect(route.collectionPoints, isEmpty);
   });
 }

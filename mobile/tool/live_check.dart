@@ -12,6 +12,7 @@ import 'package:garbagetrack/api/garbage_api.dart';
 import 'package:garbagetrack/api/logistics_api.dart';
 import 'package:garbagetrack/api/truck_api.dart';
 import 'package:garbagetrack/api/user_api.dart';
+import 'package:garbagetrack/models/models.dart';
 
 var _failures = 0;
 
@@ -58,9 +59,9 @@ Future<void> main() async {
   check(allUsers.length == 1 && allUsers.first.role == 'admin', 'admin seeded');
 
   // Resident flow.
-  await auth.register(email: 'r@example.com', password: 'Password123', fullName: 'Resident User');
+  await auth.register(email: 'r@example.com', password: 'Password123', country: 'Nigeria', fullName: 'Resident User');
   await checkThrows(
-    () => auth.register(email: 'r@example.com', password: 'Password123', fullName: 'Resident User'),
+    () => auth.register(email: 'r@example.com', password: 'Password123', country: 'Nigeria', fullName: 'Resident User'),
     409,
     'duplicate register -> 409',
   );
@@ -109,12 +110,14 @@ Future<void> main() async {
   await auth.register(
     email: 'c@example.com',
     password: 'Password123',
+    country: 'Nigeria',
     fullName: 'Collector User',
     role: 'collector',
   );
   await auth.register(
     email: 'l@example.com',
     password: 'Password123',
+    country: 'Nigeria',
     fullName: 'Logistics User',
     role: 'logistics',
   );
@@ -167,11 +170,29 @@ Future<void> main() async {
     longitude: 3.3706,
     latitude: 6.4506,
     types: const ['plastic'],
+    district: 'Ojota',
   );
+  check(post3.district == 'Ojota', 'district roundtrip');
   await loginAs('l@example.com', 'Password123');
+  final depot = await logistics.createFacility(
+    name: 'Live Depot',
+    kind: 'waste_center',
+    longitude: 3.39,
+    latitude: 6.47,
+    acceptedTypes: const ['plastic'],
+  );
   final planned = await logistics.createRoute(
-      truckId: truck.id, name: 'Live run', postIds: [post3.id]);
+    truckId: truck.id,
+    depotIds: [depot.id],
+    name: 'Live run',
+    postIds: [post3.id],
+    collectionPoints: [GeoPoint(longitude: 3.391, latitude: 6.471)],
+    district: 'Ojota',
+    country: 'Nigeria',
+  );
   check(planned.stops.length == 1, 'manual route assignment');
+  check(planned.depotIds.length == 1, 'route depot roundtrip');
+  check(planned.collectionPoints.length == 1, 'route collection-point roundtrip');
   check((await logistics.listRoutes(truckId: truck.id)).length == 1, 'list routes');
 
   client.close();

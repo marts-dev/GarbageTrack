@@ -32,13 +32,16 @@ class _PostsScreenState extends State<PostsScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final canReport = auth.user?.isResident ?? false;
     return Scaffold(
       appBar: AppBar(title: const Text('My reports')),
-      floatingActionButton: FloatingActionButton.extended(
-        icon: const Icon(Icons.add),
-        label: const Text('Report'),
-        onPressed: _report,
-      ),
+      floatingActionButton: canReport
+          ? FloatingActionButton.extended(
+              icon: const Icon(Icons.add),
+              label: const Text('Report'),
+              onPressed: _report,
+            )
+          : null,
       body: Column(
         children: [
           SingleChildScrollView(
@@ -81,8 +84,8 @@ class _PostsScreenState extends State<PostsScreen> {
                         subtitle: _status == null
                             ? 'Report waste to see it here.'
                             : 'Nothing with this status.',
-                        actionLabel: 'Report garbage',
-                        onAction: _report,
+                        actionLabel: canReport ? 'Report garbage' : null,
+                        onAction: canReport ? _report : null,
                       ),
                     );
                   }

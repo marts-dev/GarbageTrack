@@ -21,6 +21,7 @@ from app.schemas.logistics import (
 )
 from app.services import logistics as logistics_service
 from app.services.logistics import (
+    DepotsNotFoundError,
     EmptyUpdateError,
     FacilityNotFoundError,
     NoCollectablePostsError,
@@ -46,9 +47,13 @@ async def list_all_posts(
     post_type: Annotated[GarbageType | None, Query(alias="type")] = None,
     user_id: str | None = None,
     limit: Limit50 = 100,
+    district: str | None = None,
+    country: str | None = None,
 ):
     _ = user
-    return await logistics_service.list_all_posts(db, status, post_type, user_id, limit)
+    return await logistics_service.list_all_posts(
+        db, status, post_type, user_id, limit, district, country
+    )
 
 
 @router.get("/garbage/summary", response_model=GarbageSummaryResponse)
@@ -126,6 +131,8 @@ async def create_planned_route(payload: PlannedRouteCreate, user: Dispatcher, db
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
     except PostsNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
+    except DepotsNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
     except PostsAlreadyCollectedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
     except NoCollectablePostsError as exc:
@@ -154,5 +161,14 @@ async def read_planned_route(route_id: str, user: Dispatcher, db: Db):
     _ = user
     try:
         return await logistics_service.get_planned_route(db, route_id)
+    except PlannedRouteNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="route not found") from None
+
+
+@router.delete("/routes/{route_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_planned_route(route_id: str, user: Dispatcher, db: Db):
+    _ = user
+    try:
+        await logistics_service.delete_planned_route(db, route_id)
     except PlannedRouteNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="route not found") from None

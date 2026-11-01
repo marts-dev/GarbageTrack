@@ -33,7 +33,7 @@ from app.models.auth import Role
 from app.models.common import utcnow
 from app.models.facility import FacilityKind
 from app.models.garbage import GarbageStatus, GarbageType
-from app.models.geo import GeoPoint
+from app.models.geo import GeoLineString, GeoPoint
 from app.models.route import PlannedStop
 from app.models.truck import TruckAvailability, TruckStatus
 
@@ -68,22 +68,25 @@ async def seed() -> dict:
                 id=resident_id,
                 email="resident@example.com",
                 hashed_password=security.hash_password(PASSWORD),
-                full_name="Adaeze Obi",
+                full_name="Maria Santos",
                 role=Role.RESIDENT,
+                country="Philippines",
             ),
             auth_model.UserDocument(
                 id=collector_id,
                 email="collector@example.com",
                 hashed_password=security.hash_password(PASSWORD),
-                full_name="Emeka Danjuma",
+                full_name="Jose Ramos",
                 role=Role.COLLECTOR,
+                country="Philippines",
             ),
             auth_model.UserDocument(
                 id=logistics_id,
                 email="logistics@example.com",
                 hashed_password=security.hash_password(PASSWORD),
-                full_name="Fatima Bello",
+                full_name="Ana Reyes",
                 role=Role.LOGISTICS,
+                country="Philippines",
             ),
             auth_model.UserDocument(
                 id=admin_id,
@@ -91,6 +94,7 @@ async def seed() -> dict:
                 hashed_password=security.hash_password(PASSWORD),
                 full_name="Site Admin",
                 role=Role.ADMIN,
+                country="Philippines",
             ),
         ]
         await db[auth_model.COLLECTION].insert_many(
@@ -99,34 +103,35 @@ async def seed() -> dict:
 
         await db[user_model.COLLECTION].insert_one(
             user_model.UserLocationDocument(
-                user_id=str(resident_id), location=pt(3.3700, 6.4505)
+                user_id=str(resident_id), location=pt(121.0300, 14.6505)
             ).model_dump(by_alias=True, exclude={"id"})
         )
 
         post_ids = [ObjectId() for _ in range(9)]
         specs = [
-            # (lon, lat, types, description, status, days_ago, image?)
-            (3.3710, 6.4510, [GarbageType.PLASTIC, GarbageType.METAL], "Bags by the gate",
-             GarbageStatus.POSTED, 0, False),
-            (3.3720, 6.4520, [GarbageType.ORGANIC], "Food waste bins overflowing",
-             GarbageStatus.POSTED, 1, False),
-            (3.3690, 6.4490, [GarbageType.PAPER], "Stack of cartons",
-             GarbageStatus.POSTED, 1, False),
-            (3.3750, 6.4550, [GarbageType.GLASS], "Broken bottles near junction",
-             GarbageStatus.POSTED, 2, True),
-            (3.3680, 6.4480, [GarbageType.ELECTRONIC], "Old CRT monitor",
-             GarbageStatus.POSTED, 3, False),
-            (3.3730, 6.4530, [GarbageType.PLASTIC], "Bottles at market entrance",
-             GarbageStatus.SCHEDULED, 2, False),
-            (3.3740, 6.4540, [GarbageType.TEXTILE], "Clothing pile",
-             GarbageStatus.COLLECTED, 4, False),
-            (3.3670, 6.4470, [GarbageType.HAZARDOUS], "Used batteries",
-             GarbageStatus.COLLECTED, 5, False),
-            (3.3760, 6.4560, [GarbageType.PLASTIC, GarbageType.PAPER], "Mixed dump behind plaza",
-             GarbageStatus.SCHEDULED, 1, False),
+            # (lon, lat, types, description, status, days_ago, image?, district)
+            # Quezon City, Metro Manila.
+            (121.0310, 14.6510, [GarbageType.PLASTIC, GarbageType.METAL], "Bags by the gate",
+             GarbageStatus.POSTED, 0, False, "Commonwealth"),
+            (121.0320, 14.6520, [GarbageType.ORGANIC], "Food waste bins overflowing",
+             GarbageStatus.POSTED, 1, False, "Commonwealth"),
+            (121.0290, 14.6490, [GarbageType.PAPER], "Stack of cartons",
+             GarbageStatus.POSTED, 1, False, "Batasan Hills"),
+            (121.0350, 14.6550, [GarbageType.GLASS], "Broken bottles near junction",
+             GarbageStatus.POSTED, 2, True, "Batasan Hills"),
+            (121.0280, 14.6480, [GarbageType.ELECTRONIC], "Old CRT monitor",
+             GarbageStatus.POSTED, 3, False, None),
+            (121.0330, 14.6530, [GarbageType.PLASTIC], "Bottles at market entrance",
+             GarbageStatus.SCHEDULED, 2, False, "Commonwealth"),
+            (121.0340, 14.6540, [GarbageType.TEXTILE], "Clothing pile",
+             GarbageStatus.COLLECTED, 4, False, "Batasan Hills"),
+            (121.0270, 14.6470, [GarbageType.HAZARDOUS], "Used batteries",
+             GarbageStatus.COLLECTED, 5, False, "Commonwealth"),
+            (121.0360, 14.6560, [GarbageType.PLASTIC, GarbageType.PAPER], "Mixed dump behind plaza",
+             GarbageStatus.SCHEDULED, 1, False, "Batasan Hills"),
         ]
         posts = []
-        for pid, (lon, lat, types, desc, status, days, image) in zip(post_ids, specs):
+        for pid, (lon, lat, types, desc, status, days, image, district) in zip(post_ids, specs):
             created = now - timedelta(days=days)
             posts.append(
                 garbage_model.GarbagePostDocument(
@@ -135,6 +140,8 @@ async def seed() -> dict:
                     location=pt(lon, lat),
                     types=types,
                     description=desc,
+                    district=district,
+                    country="Philippines",
                     image_base64=TINY_PNG if image else None,
                     image_content_type="image/png" if image else None,
                     status=status,
@@ -150,29 +157,30 @@ async def seed() -> dict:
         trucks = [
             truck_model.TruckDocument(
                 id=truck_ids[0],
-                plate_number="KTU-101AA",
+                plate_number="NAA 1234",
                 status=TruckStatus.ENROUTE,
                 availability=TruckAvailability.WORKING,
                 garbage_types=[GarbageType.PLASTIC, GarbageType.PAPER],
-                current_location=pt(3.3700, 6.4500),
+                current_location=pt(121.0300, 14.6500),
                 eta_minutes=15,
                 capacity=10,
                 load=3,
+                operator_id=str(collector_id),
             ),
             truck_model.TruckDocument(
                 id=truck_ids[1],
-                plate_number="KTU-202BB",
+                plate_number="NBB 5678",
                 status=TruckStatus.ENROUTE,
                 availability=TruckAvailability.AVAILABLE,
                 garbage_types=[GarbageType.ORGANIC],
-                current_location=pt(3.3850, 6.4650),
+                current_location=pt(121.0450, 14.6650),
                 eta_minutes=40,
                 capacity=8,
                 load=0,
             ),
             truck_model.TruckDocument(
                 id=truck_ids[2],
-                plate_number="KTU-303CC",
+                plate_number="NCC 9012",
                 status=TruckStatus.SCHEDULED,
                 availability=TruckAvailability.AVAILABLE,
                 garbage_types=[GarbageType.GLASS, GarbageType.METAL],
@@ -185,47 +193,66 @@ async def seed() -> dict:
 
         facilities = [
             facility_model.FacilityDocument(
-                name="Ojota Dump Site",
+                name="Payatas Transfer Station",
                 kind=FacilityKind.DUMP_SITE,
-                location=pt(3.3900, 6.4700),
+                location=pt(121.0500, 14.6700),
                 accepted_types=[GarbageType.GENERAL, GarbageType.ORGANIC, GarbageType.PLASTIC],
-                address="1 Depot Rd, Ojota",
+                address="1 Litex Rd, Payatas",
             ),
             facility_model.FacilityDocument(
-                name="Ikeja Recycling Hub",
+                name="Cubao Recycling Hub",
                 kind=FacilityKind.RECYCLING,
-                location=pt(3.3600, 6.4600),
+                location=pt(121.0200, 14.6600),
                 accepted_types=[
                     GarbageType.PLASTIC, GarbageType.PAPER, GarbageType.GLASS, GarbageType.METAL,
                 ],
-                address="5 Green Ave, Ikeja",
+                address="5 Green Ave, Cubao",
             ),
             facility_model.FacilityDocument(
-                name="Epe Waste Center",
+                name="Marikina Waste Center",
                 kind=FacilityKind.WASTE_CENTER,
-                location=pt(3.3800, 6.4400),
+                location=pt(121.0400, 14.6400),
                 accepted_types=[GarbageType.GENERAL, GarbageType.TEXTILE, GarbageType.ELECTRONIC],
-                address="10 Central Rd",
+                address="10 Central Rd, Marikina",
             ),
         ]
+        facility_ids = [ObjectId() for _ in range(len(facilities))]
+        for facility, fid in zip(facilities, facility_ids):
+            facility.id = fid
         await db[facility_model.COLLECTION].insert_many(
-            [f.model_dump(by_alias=True, exclude={"id"}) for f in facilities]
+            [f.model_dump(by_alias=True) for f in facilities]
         )
 
         route_posts = [5, 8]  # indexes into specs above (both scheduled)
+        route_origin = pt(121.0300, 14.6500)
+        route_stops = [
+            PlannedStop(
+                post_id=post_ids[i],
+                location=pt(specs[i][0], specs[i][1]),
+                types=specs[i][2],
+            )
+            for i in route_posts
+        ]
+        depot_end = pt(121.0500, 14.6700)
         await db[route_model.COLLECTION].insert_one(
             route_model.PlannedRouteDocument(
                 truck_id=truck_ids[0],
-                name="Morning run - Ojota",
-                origin=pt(3.3700, 6.4500),
-                stops=[
-                    PlannedStop(
-                        post_id=post_ids[i],
-                        location=pt(specs[i][0], specs[i][1]),
-                        types=specs[i][2],
-                    )
-                    for i in route_posts
-                ],
+                name="Morning run - Commonwealth",
+                origin=route_origin,
+                stops=route_stops,
+                depot_ids=facility_ids[:2],
+                collection_points=[pt(121.0325, 14.6525), pt(121.0355, 14.6555)],
+                geometry=GeoLineString(
+                    coordinates=[
+                        (route_origin.longitude, route_origin.latitude),
+                        *[
+                            (stop.location.longitude, stop.location.latitude)
+                            for stop in route_stops
+                        ],
+                        (depot_end.longitude, depot_end.latitude),
+                    ]
+                ),
+                geometry_source="straight",
             ).model_dump(by_alias=True, exclude={"id"})
         )
         counts = {name: await db[name].count_documents({}) for name in COLLECTIONS}

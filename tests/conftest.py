@@ -50,7 +50,9 @@ def make_user(client, fake_db: FakeDatabase):
         full_name = f"User {next(counter)}"
         if role_enum == Role.ADMIN:
             user = asyncio.run(
-                auth_service.create_user(fake_db, email, password, role_enum, full_name)
+                auth_service.create_user(
+                    fake_db, email, password, role_enum, full_name, country="Nigeria"
+                )
             )
             user_id = user.id
         else:
@@ -61,6 +63,7 @@ def make_user(client, fake_db: FakeDatabase):
                     "password": password,
                     "full_name": full_name,
                     "role": role_enum.value,
+                    "country": "Nigeria",
                 },
             )
             assert response.status_code == 201, response.text

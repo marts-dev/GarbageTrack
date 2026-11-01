@@ -1,10 +1,13 @@
 """Auth request/response schemas."""
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, StringConstraints
 
 from app.models.auth import Role
+
+CountryName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
 
 class RegisterRequest(BaseModel):
@@ -12,6 +15,7 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=8, max_length=72)
     full_name: str | None = None
     role: Role = Role.RESIDENT
+    country: CountryName
 
 
 class TokenResponse(BaseModel):
@@ -29,6 +33,7 @@ class UserResponse(BaseModel):
     email: str
     full_name: str | None
     role: Role
+    country: str | None
     is_active: bool
     created_at: datetime
 
@@ -39,3 +44,4 @@ class RoleUpdateRequest(BaseModel):
 
 class ProfileUpdateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=100)
+    country: CountryName | None = None

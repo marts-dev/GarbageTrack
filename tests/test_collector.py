@@ -25,6 +25,14 @@ def _make_truck(client, headers, **overrides):
     return response.json()
 
 
+def _assign(client, truck_id, operator_id, headers):
+    response = client.patch(
+        f"/api/v1/trucks/{truck_id}", json={"operator_id": operator_id}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def _make_post(client, user, **overrides):
     payload = {
         "user_id": user["id"],
@@ -117,6 +125,7 @@ def test_route_empty_when_truck_full(client, dispatcher, collector, make_user):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"], capacity=1)
     _make_post(client, resident)
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     collect = client.post(
         f"/api/v1/trucks/{truck['id']}/collect-vicinity", json={}, headers=collector["headers"]
     )
@@ -133,6 +142,7 @@ def test_collect_vicinity_marks_posts_and_updates_load(client, dispatcher, colle
     truck = _make_truck(client, dispatcher["headers"], capacity=5)
     p1 = _make_post(client, resident, types=["plastic"])
     _make_post(client, resident, types=["glass"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
 
     response = client.post(
         f"/api/v1/trucks/{truck['id']}/collect-vicinity",
@@ -154,6 +164,7 @@ def test_collect_vicinity_marks_posts_and_updates_load(client, dispatcher, colle
 
 def test_collect_vicinity_needs_location_and_truck(client, dispatcher, collector):
     truck = _make_truck(client, dispatcher["headers"], current_location=None)
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     assert (
         client.post(
             f"/api/v1/trucks/{truck['id']}/collect-vicinity", json={}, headers=collector["headers"]
@@ -174,6 +185,7 @@ def test_update_availability_and_load_reset(client, dispatcher, collector, make_
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"], capacity=5)
     _make_post(client, resident)
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     client.post(
         f"/api/v1/trucks/{truck['id']}/collect-vicinity", json={}, headers=collector["headers"]
     )

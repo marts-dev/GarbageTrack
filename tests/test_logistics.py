@@ -178,12 +178,18 @@ def test_facility_list_filter_and_errors(client, dispatcher):
 def test_create_route_manual_marks_posts_scheduled(client, dispatcher, make_user):
     me = make_user()
     truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
     p1 = _make_post(client, me)
     p2 = _make_post(client, me)
 
     response = client.post(
         "/api/v1/logistics/routes",
-        json={"truck_id": truck["id"], "name": "Morning run", "post_ids": [p1["id"], p2["id"]]},
+        json={
+            "truck_id": truck["id"],
+            "name": "Morning run",
+            "post_ids": [p1["id"], p2["id"]],
+            "depot_ids": [depot["id"]],
+        },
         headers=dispatcher["headers"],
     )
     assert response.status_code == 201, response.text
@@ -216,11 +222,14 @@ def test_create_route_manual_marks_posts_scheduled(client, dispatcher, make_user
 def test_create_route_auto_uses_truck_route(client, dispatcher, make_user):
     me = make_user()
     truck = _make_truck(client, dispatcher["headers"], capacity=1)
+    depot = _make_facility(client, dispatcher["headers"])
     p1 = _make_post(client, me, types=["plastic"])
     _make_post(client, me, types=["glass"])
 
     response = client.post(
-        "/api/v1/logistics/routes", json={"truck_id": truck["id"]}, headers=dispatcher["headers"]
+        "/api/v1/logistics/routes",
+        json={"truck_id": truck["id"], "depot_ids": [depot["id"]]},
+        headers=dispatcher["headers"],
     )
     assert response.status_code == 201, response.text
     body = response.json()
@@ -231,26 +240,31 @@ def test_create_route_auto_uses_truck_route(client, dispatcher, make_user):
 def test_create_route_errors(client, dispatcher, make_user):
     me = make_user()
     truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
     collected = _make_post(client, me)
     client.patch(f"/api/v1/garbage/{collected['id']}/confirm-collected", headers=me["headers"])
 
     unknown_truck = client.post(
         "/api/v1/logistics/routes",
-        json={"truck_id": "000000000000000000000000"},
+        json={"truck_id": "000000000000000000000000", "depot_ids": [depot["id"]]},
         headers=dispatcher["headers"],
     )
     assert unknown_truck.status_code == 404
 
     missing_post = client.post(
         "/api/v1/logistics/routes",
-        json={"truck_id": truck["id"], "post_ids": ["000000000000000000000000"]},
+        json={
+            "truck_id": truck["id"],
+            "post_ids": ["000000000000000000000000"],
+            "depot_ids": [depot["id"]],
+        },
         headers=dispatcher["headers"],
     )
     assert missing_post.status_code == 404
 
     collected_post = client.post(
         "/api/v1/logistics/routes",
-        json={"truck_id": truck["id"], "post_ids": [collected["id"]]},
+        json={"truck_id": truck["id"], "post_ids": [collected["id"]], "depot_ids": [depot["id"]]},
         headers=dispatcher["headers"],
     )
     assert collected_post.status_code == 409
@@ -259,7 +273,9 @@ def test_create_route_errors(client, dispatcher, make_user):
     _make_post(client, me)
     assert (
         client.post(
-            "/api/v1/logistics/routes", json={"truck_id": no_location["id"]}, headers=dispatcher["headers"]
+            "/api/v1/logistics/routes",
+            json={"truck_id": no_location["id"], "depot_ids": [depot["id"]]},
+            headers=dispatcher["headers"],
         ).status_code
         == 400
     )
@@ -287,3 +303,118 @@ def test_logistics_routes_require_logistics_role(client, make_user):
         == 403
     )
     assert client.get("/api/v1/logistics/garbage").status_code == 401
+
+
+def test_delete_route_releases_stops(client, dispatcher, make_user):
+    me = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    p1 = _make_post(client, me)
+    p2 = _make_post(client, me)
+    created = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": truck["id"],
+            "post_ids": [p1["id"], p2["id"]],
+            "depot_ids": [depot["id"]],
+        },
+        headers=dispatcher["headers"],
+    )
+    assert created.status_code == 201, created.text
+    route_id = created.json()["id"]
+
+    deleted = client.delete(f"/api/v1/logistics/routes/{route_id}", headers=dispatcher["headers"])
+    assert deleted.status_code == 204
+
+    assert (
+        client.get(f"/api/v1/logistics/routes/{route_id}", headers=dispatcher["headers"]).status_code
+        == 404
+    )
+    listed = client.get("/api/v1/logistics/routes", headers=dispatcher["headers"])
+    assert route_id not in [r["id"] for r in listed.json()]
+
+    assert (
+        client.get(f"/api/v1/garbage/{p1['id']}", headers=me["headers"]).json()["status"]
+        == "posted"
+    )
+    assert (
+        client.get(f"/api/v1/garbage/{p2['id']}", headers=me["headers"]).json()["status"]
+        == "posted"
+    )
+
+
+def test_delete_route_keeps_collected_untouched(client, dispatcher, make_user):
+    me = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    p1 = _make_post(client, me)
+    p2 = _make_post(client, me)
+    created = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": truck["id"],
+            "post_ids": [p1["id"], p2["id"]],
+            "depot_ids": [depot["id"]],
+        },
+        headers=dispatcher["headers"],
+    )
+    route_id = created.json()["id"]
+    assert (
+        client.patch(
+            f"/api/v1/garbage/{p1['id']}/confirm-collected", headers=me["headers"]
+        ).status_code
+        == 200
+    )
+
+    assert (
+        client.delete(
+            f"/api/v1/logistics/routes/{route_id}", headers=dispatcher["headers"]
+        ).status_code
+        == 204
+    )
+    assert (
+        client.get(f"/api/v1/garbage/{p1['id']}", headers=me["headers"]).json()["status"]
+        == "collected"
+    )
+    assert (
+        client.get(f"/api/v1/garbage/{p2['id']}", headers=me["headers"]).json()["status"]
+        == "posted"
+    )
+
+
+def test_delete_route_404(client, dispatcher):
+    assert (
+        client.delete(
+            "/api/v1/logistics/routes/000000000000000000000000", headers=dispatcher["headers"]
+        ).status_code
+        == 404
+    )
+    assert (
+        client.delete("/api/v1/logistics/routes/not-an-id", headers=dispatcher["headers"]).status_code
+        == 404
+    )
+
+
+def test_delete_route_requires_logistics_role(client, dispatcher, make_user):
+    me = make_user()
+    resident = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    post = _make_post(client, me)
+    created = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": truck["id"],
+            "post_ids": [post["id"]],
+            "depot_ids": [depot["id"]],
+        },
+        headers=dispatcher["headers"],
+    )
+    route_id = created.json()["id"]
+    assert (
+        client.delete(
+            f"/api/v1/logistics/routes/{route_id}", headers=resident["headers"]
+        ).status_code
+        == 403
+    )
+    assert client.delete(f"/api/v1/logistics/routes/{route_id}").status_code == 401

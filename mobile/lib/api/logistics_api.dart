@@ -9,12 +9,16 @@ class LogisticsApi {
     String? status,
     String? type,
     String? userId,
+    String? district,
+    String? country,
     int limit = 100,
   }) async {
     final query = <String, String>{'limit': '$limit'};
     if (status != null) query['status'] = status;
     if (type != null) query['type'] = type;
     if (userId != null) query['user_id'] = userId;
+    if (district != null && district.isNotEmpty) query['district'] = district;
+    if (country != null && country.isNotEmpty) query['country'] = country;
     final body = await _client.get('/logistics/garbage', query: query);
     return (body as List)
         .map((e) => GarbagePost.fromJson(e as Map<String, dynamic>))
@@ -45,6 +49,7 @@ class LogisticsApi {
             ? null
             : GeoPoint.fromJson(m['current_location'] as Map<String, dynamic>),
         capacity: (m['capacity'] as num?)?.toInt(),
+        operatorId: m['operator_id'] as String?,
       );
     }).toList();
   }
@@ -110,23 +115,38 @@ class LogisticsApi {
 
   Future<PlannedRoute> createRoute({
     required String truckId,
+    required List<String> depotIds,
     String? name,
     List<String>? postIds,
+    List<GeoPoint>? collectionPoints,
     double? longitude,
     double? latitude,
     double maxMeters = 5000,
     int limit = 20,
     List<String>? types,
+    String? district,
+    String? country,
   }) async {
     final body = await _client.postJson('/logistics/routes', body: {
       'truck_id': truckId,
+      'depot_ids': depotIds,
       if (name != null && name.isNotEmpty) 'name': name,
       if (postIds != null) 'post_ids': postIds,
+      // Flat {longitude, latitude} shape; the API returns GeoJSON.
+      if (collectionPoints != null && collectionPoints.isNotEmpty)
+        'collection_points': [
+          for (final p in collectionPoints)
+            {'longitude': p.longitude, 'latitude': p.latitude},
+        ],
       if (longitude != null) 'longitude': longitude,
       if (latitude != null) 'latitude': latitude,
       'max_meters': maxMeters,
       'limit': limit,
       if (types != null) 'types': types,
+      // district/country narrow stop candidates on the auto-generate path;
+      // the manual post_ids path ignores them.
+      if (district != null && district.isNotEmpty) 'district': district,
+      if (country != null && country.isNotEmpty) 'country': country,
     });
     return PlannedRoute.fromJson(body as Map<String, dynamic>);
   }
@@ -139,5 +159,11 @@ class LogisticsApi {
     return (body as List)
         .map((e) => PlannedRoute.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Deletes a planned route, releasing its scheduled stops back to posted.
+  /// 404 when the route id is unknown.
+  Future<void> deleteRoute(String routeId) async {
+    await _client.delete('/logistics/routes/$routeId');
   }
 }

@@ -34,6 +34,8 @@ class GarbagePostDocument(MongoDocument):
     location: GeoPoint
     types: list[GarbageType] = Field(min_length=1)
     description: str | None = None
+    district: str | None = None
+    country: str | None = None
     image_base64: str | None = None
     image_content_type: str | None = None
     status: GarbageStatus = GarbageStatus.POSTED

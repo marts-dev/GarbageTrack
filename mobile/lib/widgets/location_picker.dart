@@ -18,11 +18,18 @@ class LocationMapPicker extends StatefulWidget {
     this.initial,
     this.height = 300,
     this.tileProvider,
+    this.fallbackCenter,
+    this.fallbackZoom,
   });
 
   final ValueChanged<GeoPoint?> onChanged;
   final GeoPoint? initial;
   final double height;
+
+  /// Map center/zoom before anything is picked, e.g. the user's country
+  /// viewport. Defaults to the world view.
+  final LatLng? fallbackCenter;
+  final double? fallbackZoom;
 
   /// Overrides tile loading (e.g. an offline stub in widget tests).
   /// Defaults to the standard network tile provider.
@@ -99,8 +106,9 @@ class _LocationMapPickerState extends State<LocationMapPicker> {
                 FlutterMap(
                   mapController: _controller,
                   options: MapOptions(
-                    initialCenter: picked?.latLng ?? const LatLng(0, 0),
-                    initialZoom: picked == null ? 2 : 14,
+                    initialCenter:
+                        picked?.latLng ?? widget.fallbackCenter ?? const LatLng(0, 0),
+                    initialZoom: picked == null ? widget.fallbackZoom ?? 2 : 14,
                     interactionOptions: const InteractionOptions(
                       flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
                     ),

@@ -2,7 +2,7 @@ import asyncio
 
 
 def _register(client, email="ada@example.com", password="Password123", **extra):
-    payload = {"email": email, "password": password, "full_name": "Ada Test"}
+    payload = {"email": email, "password": password, "full_name": "Ada Test", "country": "Nigeria"}
     payload.update(extra)
     return client.post("/api/v1/auth/register", json=payload)
 
@@ -53,7 +53,7 @@ def test_register_validates_input(client):
 def test_register_name_is_optional(client):
     response = client.post(
         "/api/v1/auth/register",
-        json={"email": "noname@example.com", "password": "Password123"},
+        json={"email": "noname@example.com", "password": "Password123", "country": "Nigeria"},
     )
     assert response.status_code == 201, response.text
     assert response.json()["full_name"] is None
@@ -166,6 +166,29 @@ def test_update_own_profile_name(client, make_user):
 
     assert client.patch("/api/v1/auth/me", json={"full_name": ""}, headers=me["headers"]).status_code == 422
     assert client.patch("/api/v1/auth/me", json={"full_name": "X"}).status_code == 401
+
+
+def test_logistics_can_list_users_with_role_filter(client, make_user):
+    logistics = make_user("logistics")
+    collector = make_user("collector")
+    make_user()
+
+    listed = client.get("/api/v1/auth/users", headers=logistics["headers"])
+    assert listed.status_code == 200
+    assert len(listed.json()) == 3
+
+    collectors = client.get(
+        "/api/v1/auth/users", params={"role": "collector"}, headers=logistics["headers"]
+    )
+    assert collectors.status_code == 200
+    assert [u["id"] for u in collectors.json()] == [collector["id"]]
+
+    assert (
+        client.get(
+            "/api/v1/auth/users", params={"role": "collector"}, headers=collector["headers"]
+        ).status_code
+        == 403
+    )
 
 
 def test_password_is_stored_hashed(client, fake_db):

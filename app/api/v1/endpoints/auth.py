@@ -20,6 +20,7 @@ from app.services.auth import InvalidCredentialsError, UserExistsError, UserNotF
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 Admin = Annotated[UserResponse, Depends(require_roles(Role.ADMIN))]
+Dispatcher = Annotated[UserResponse, Depends(require_roles(Role.LOGISTICS))]
 
 PUBLIC_ROLES = {Role.RESIDENT, Role.COLLECTOR, Role.LOGISTICS}
 
@@ -33,7 +34,7 @@ async def register(payload: RegisterRequest, db: Db):
         )
     try:
         return await auth_service.create_user(
-            db, payload.email, payload.password, payload.role, payload.full_name
+            db, payload.email, payload.password, payload.role, payload.full_name, payload.country
         )
     except UserExistsError:
         raise HTTPException(
@@ -82,15 +83,20 @@ async def read_me(user: CurrentUser):
 @router.patch("/me", response_model=UserResponse)
 async def update_me(payload: ProfileUpdateRequest, user: CurrentUser, db: Db):
     try:
-        return await auth_service.update_profile(db, user.id, payload.full_name)
+        return await auth_service.update_profile(db, user.id, payload.full_name, payload.country)
     except UserNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found") from None
 
 
 @router.get("/users", response_model=list[UserResponse])
-async def list_users(user: Admin, db: Db, limit: Annotated[int, Query(ge=1, le=200)] = 100):
+async def list_users(
+    user: Dispatcher,
+    db: Db,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    role: Role | None = None,
+):
     _ = user
-    return await auth_service.list_users(db, limit)
+    return await auth_service.list_users(db, limit, role)
 
 
 @router.patch("/users/{user_id}/role", response_model=UserResponse)

@@ -90,4 +90,46 @@ class TruckApi {
         .patchJson('/trucks/$truckId/availability', body: {'availability': availability});
     return Truck.fromJson(body as Map<String, dynamic>);
   }
+
+  /// Lists trucks for operations roles (collector, logistics, admin).
+  Future<List<Truck>> listTrucks({
+    String? status,
+    String? availability,
+    int limit = 50,
+  }) async {
+    final query = <String, String>{'limit': '$limit'};
+    if (status != null) query['status'] = status;
+    if (availability != null) query['availability'] = availability;
+    final body = await _client.get('/trucks', query: query);
+    return (body as List).map((e) => Truck.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  /// Updates a truck (logistics/admin). Only non-null fields are sent except
+  /// [operatorId], which is sent — including an explicit null to unassign —
+  /// whenever [operatorIdSet] is true. 404 when the truck or operator user is
+  /// unknown, 409 on double-bind or 422 for a non-collector operator id.
+  Future<Truck> updateTruck(
+    String truckId, {
+    String? plateNumber,
+    int? capacity,
+    List<String>? garbageTypes,
+    String? status,
+    String? operatorId,
+    bool operatorIdSet = false,
+  }) async {
+    final body = await _client.patchJson('/trucks/$truckId', body: {
+      if (plateNumber != null) 'plate_number': plateNumber,
+      if (capacity != null) 'capacity': capacity,
+      if (garbageTypes != null) 'garbage_types': garbageTypes,
+      if (status != null) 'status': status,
+      if (operatorIdSet) 'operator_id': operatorId,
+    });
+    return Truck.fromJson(body as Map<String, dynamic>);
+  }
+
+  /// Deletes a truck (logistics/admin). 404 when unknown, 409 when the truck
+  /// has an assigned planned route.
+  Future<void> deleteTruck(String truckId) async {
+    await _client.delete('/trucks/$truckId');
+  }
 }

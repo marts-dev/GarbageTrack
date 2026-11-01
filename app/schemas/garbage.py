@@ -15,6 +15,7 @@ class GarbagePostCreate(ImagePayload):
     latitude: float = Field(ge=-90, le=90)
     types: list[GarbageType] = Field(min_length=1)
     description: str | None = Field(default=None, max_length=2000)
+    district: str | None = Field(default=None, max_length=120)
 
 
 class GarbagePostResponse(BaseModel):
@@ -23,6 +24,8 @@ class GarbagePostResponse(BaseModel):
     location: GeoPoint
     types: list[GarbageType]
     description: str | None
+    district: str | None
+    country: str | None
     has_image: bool
     image_content_type: str | None
     status: GarbageStatus

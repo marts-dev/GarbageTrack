@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/country_viewports.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import '../widgets/geo_map.dart';
@@ -100,7 +101,11 @@ class _LocationScreenState extends State<LocationScreen> {
             const SizedBox(height: 16),
             Text('New position', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            LocationMapPicker(onChanged: (point) => setState(() => _point = point)),
+            LocationMapPicker(
+              onChanged: (point) => setState(() => _point = point),
+              fallbackCenter: viewportFor(auth.country).center,
+              fallbackZoom: viewportFor(auth.country).zoom,
+            ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: _point == null || _saving ? null : _save,

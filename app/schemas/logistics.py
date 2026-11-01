@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.models.facility import FacilityKind
 from app.models.garbage import GarbageType
-from app.models.geo import GeoPoint
+from app.models.geo import GeoLineString, GeoPoint
 from app.models.route import PlannedRouteStatus
 from app.models.truck import TruckAvailability, TruckStatus
 
@@ -51,6 +51,7 @@ class TruckLocationResponse(BaseModel):
     current_location: GeoPoint | None
     load: int
     capacity: int | None
+    operator_id: str | None = None
 
 
 class GarbageSummaryResponse(BaseModel):
@@ -68,6 +69,10 @@ class PlannedRouteCreate(BaseModel):
     max_meters: float = Field(default=5000, gt=0)
     limit: int = Field(default=20, ge=1, le=100)
     types: list[GarbageType] | None = None
+    depot_ids: list[str] = Field(min_length=1)
+    collection_points: list[FacilityLocation] | None = Field(default=None, max_length=100)
+    district: str | None = None
+    country: str | None = None
 
 
 class PlannedStopResponse(BaseModel):
@@ -85,3 +90,7 @@ class PlannedRouteResponse(BaseModel):
     stops: list[PlannedStopResponse]
     status: PlannedRouteStatus
     created_at: datetime
+    depot_ids: list[str] = Field(default_factory=list)
+    collection_points: list[GeoPoint] = Field(default_factory=list)
+    geometry: GeoLineString | None = None
+    geometry_source: str = "straight"

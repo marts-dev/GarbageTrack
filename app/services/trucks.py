@@ -5,10 +5,12 @@ from bson.errors import InvalidId
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.models import garbage as garbage_model
+from app.models import route as route_model
 from app.models import truck as truck_model
+from app.models.auth import Role
 from app.models.common import utcnow
 from app.models.garbage import GarbageStatus
-from app.models.geo import GeoPoint, geo_point
+from app.models.geo import GeoLineString, GeoPoint, geo_point
 from app.models.truck import TruckAvailability, TruckStatus
 from app.schemas.trucks import (
     CollectionRouteResponse,
@@ -17,7 +19,11 @@ from app.schemas.trucks import (
     RouteStop,
     TruckResponse,
     TruckScheduleCreate,
+    TruckUpdate,
 )
+from app.services import auth as auth_service
+from app.services import routing as routing_service
+from app.services.auth import UserNotFoundError
 
 EARTH_RADIUS_METERS = 6378100
 
@@ -27,6 +33,30 @@ class TruckNotFoundError(Exception):
 
 
 class TruckLocationUnknownError(Exception):
+    pass
+
+
+class TruckNotAssignedError(Exception):
+    pass
+
+
+class TruckOperatorConflictError(Exception):
+    pass
+
+
+class TruckOperatorNotFoundError(Exception):
+    pass
+
+
+class TruckOperatorInvalidError(Exception):
+    pass
+
+
+class TruckHasRoutesError(Exception):
+    pass
+
+
+class EmptyUpdateError(Exception):
     pass
 
 
@@ -41,6 +71,7 @@ def _to_response(doc: dict) -> TruckResponse:
         eta_minutes=doc.get("eta_minutes"),
         capacity=doc.get("capacity"),
         load=doc.get("load", 0),
+        operator_id=doc.get("operator_id"),
         created_at=doc["created_at"],
     )
 
@@ -119,6 +150,88 @@ def _effective_types(truck_doc: dict, requested: list | None) -> list[str]:
     return [t for t in truck_types if t in wanted]
 
 
+def _route_geometry_for_stops(
+    origin: GeoPoint, stop_locations: list[GeoPoint]
+) -> tuple[GeoLineString | None, str]:
+    if not stop_locations:
+        return None, "straight"
+    points = [(origin.longitude, origin.latitude)] + [
+        (loc.longitude, loc.latitude) for loc in stop_locations
+    ]
+    geom = routing_service.route_points(points)
+    source = "straight" if geom.fallback else "road"
+    if len(geom.points) < 2:
+        return None, source
+    return GeoLineString(coordinates=geom.points), source
+
+
+def _require_operator_binding(truck_doc: dict, user: object | None) -> None:
+    if user is None:
+        return
+    role = getattr(user, "role", None)
+    if role != Role.COLLECTOR and str(role) != Role.COLLECTOR.value:
+        return
+    user_id = str(getattr(user, "id", ""))
+    if truck_doc.get("operator_id") != user_id:
+        raise TruckNotAssignedError("truck is not assigned to you")
+
+
+async def list_trucks(
+    db: AsyncDatabase,
+    status: TruckStatus | None = None,
+    availability: TruckAvailability | None = None,
+    limit: int = 50,
+) -> list[TruckResponse]:
+    query: dict = {}
+    if status is not None:
+        query["status"] = status.value
+    if availability is not None:
+        query["availability"] = availability.value
+    cursor = db[truck_model.COLLECTION].find(query).limit(limit)
+    return [_to_response(doc) async for doc in cursor]
+
+
+async def update_truck(
+    db: AsyncDatabase, truck_id: str, payload: TruckUpdate
+) -> TruckResponse:
+    truck_doc = await _get_truck_doc(db, truck_id)
+    changes = payload.model_dump(exclude_unset=True)
+    if "operator_id" in changes and changes["operator_id"] is not None:
+        operator_id = changes["operator_id"]
+        try:
+            ObjectId(operator_id)
+        except InvalidId as exc:
+            raise TruckOperatorInvalidError(f"invalid operator id: {operator_id}") from exc
+        try:
+            operator = await auth_service.get_user_by_id(db, operator_id)
+        except UserNotFoundError as exc:
+            raise TruckOperatorNotFoundError(operator_id) from exc
+        if operator.role != Role.COLLECTOR:
+            raise TruckOperatorInvalidError("operator must be a collector user")
+        async for other in db[truck_model.COLLECTION].find({"operator_id": operator_id}):
+            if str(other["_id"]) != str(truck_doc["_id"]):
+                raise TruckOperatorConflictError("collector already assigned to another truck")
+    if not changes:
+        raise EmptyUpdateError("no fields to update")
+    stored = await db[truck_model.COLLECTION].find_one_and_update(
+        {"_id": truck_doc["_id"]}, {"$set": changes}
+    )
+    if stored is None:
+        raise TruckNotFoundError(truck_id)
+    stored.update(changes)
+    return _to_response(stored)
+
+
+async def delete_truck(db: AsyncDatabase, truck_id: str) -> None:
+    truck_doc = await _get_truck_doc(db, truck_id)
+    existing = await db[route_model.COLLECTION].find_one({"truck_id": truck_doc["_id"]})
+    if existing is not None:
+        raise TruckHasRoutesError("truck has assigned routes")
+    result = await db[truck_model.COLLECTION].delete_one({"_id": truck_doc["_id"]})
+    if result.deleted_count == 0:
+        raise TruckNotFoundError(truck_id)
+
+
 async def get_collection_route(
     db: AsyncDatabase,
     truck_id: str,
@@ -127,6 +240,8 @@ async def get_collection_route(
     max_meters: float = 5000,
     limit: int = 20,
     types: list | None = None,
+    district: str | None = None,
+    country: str | None = None,
 ) -> CollectionRouteResponse:
     truck_doc = await _get_truck_doc(db, truck_id)
     origin = resolve_origin(truck_doc, longitude, latitude)
@@ -138,7 +253,12 @@ async def get_collection_route(
     wanted_types = _effective_types(truck_doc, types)
     if effective_limit <= 0 or not wanted_types:
         return CollectionRouteResponse(
-            truck_id=truck_id, origin=origin, remaining_capacity=remaining, stops=[]
+            truck_id=truck_id,
+            origin=origin,
+            remaining_capacity=remaining,
+            stops=[],
+            geometry=None,
+            geometry_source="straight",
         )
 
     pipeline = [
@@ -151,6 +271,8 @@ async def get_collection_route(
                 "query": {
                     "status": {"$in": [GarbageStatus.POSTED.value, GarbageStatus.SCHEDULED.value]},
                     "types": {"$in": wanted_types},
+                    **({"district": district} if district is not None else {}),
+                    **({"country": country} if country is not None else {}),
                 },
             }
         },
@@ -167,15 +289,27 @@ async def get_collection_route(
         )
         async for doc in cursor
     ]
+    geometry, geometry_source = _route_geometry_for_stops(
+        origin, [stop.location for stop in stops]
+    )
     return CollectionRouteResponse(
-        truck_id=truck_id, origin=origin, remaining_capacity=remaining, stops=stops
+        truck_id=truck_id,
+        origin=origin,
+        remaining_capacity=remaining,
+        stops=stops,
+        geometry=geometry,
+        geometry_source=geometry_source,
     )
 
 
 async def collect_vicinity(
-    db: AsyncDatabase, truck_id: str, payload: CollectVicinityRequest
+    db: AsyncDatabase,
+    truck_id: str,
+    payload: CollectVicinityRequest,
+    user: object | None = None,
 ) -> CollectVicinityResponse:
     truck_doc = await _get_truck_doc(db, truck_id)
+    _require_operator_binding(truck_doc, user)
     origin = resolve_origin(truck_doc, payload.longitude, payload.latitude)
     wanted_types = _effective_types(truck_doc, payload.types)
 
@@ -228,9 +362,13 @@ async def collect_vicinity(
 
 
 async def set_availability(
-    db: AsyncDatabase, truck_id: str, availability: TruckAvailability
+    db: AsyncDatabase,
+    truck_id: str,
+    availability: TruckAvailability,
+    user: object | None = None,
 ) -> TruckResponse:
     truck_doc = await _get_truck_doc(db, truck_id)
+    _require_operator_binding(truck_doc, user)
     update: dict = {"availability": availability.value}
     if availability == TruckAvailability.AVAILABLE:
         update["load"] = 0

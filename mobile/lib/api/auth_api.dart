@@ -8,12 +8,14 @@ class AuthApi {
   Future<User> register({
     required String email,
     required String password,
+    required String country,
     String? fullName,
     String role = 'resident',
   }) async {
     final body = await _client.postJson('/auth/register', auth: false, body: {
       'email': email,
       'password': password,
+      'country': country,
       if (fullName != null && fullName.isNotEmpty) 'full_name': fullName,
       'role': role,
     });
@@ -40,8 +42,11 @@ class AuthApi {
     return User.fromJson(body as Map<String, dynamic>);
   }
 
-  Future<List<User>> listUsers() async {
-    final body = await _client.get('/auth/users');
+  Future<List<User>> listUsers({String? role}) async {
+    final body = await _client.get(
+      '/auth/users',
+      query: role == null ? null : {'role': role},
+    );
     return (body as List).map((e) => User.fromJson(e as Map<String, dynamic>)).toList();
   }
 

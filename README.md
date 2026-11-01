@@ -59,8 +59,10 @@ curl -X POST localhost:8000/api/v1/auth/login \
 
 Set `ADMIN_EMAIL`/`ADMIN_PASSWORD` in `.env` to seed an ops admin on first
 boot (only when no users exist). Admins manage the user role via
-`GET /api/v1/auth/users` and `PATCH /api/v1/auth/users/{id}/role`; users edit
-their own display name with `PATCH /api/v1/auth/me`.
+`PATCH /api/v1/auth/users/{id}/role`; `GET /api/v1/auth/users` is visible to
+logistics and admin with an optional `?role=` filter (used to pick a collector
+when assigning a truck operator); users edit their own display name with
+`PATCH /api/v1/auth/me`.
 
 Role map: residents use locations/garbage/AI and confirm their own posts;
 `collector` unlocks truck route/collect/availability and confirming any post;
@@ -97,7 +99,14 @@ Trucks:
   types, status, current location, ETA, capacity)
 - `GET /api/v1/trucks/enroute` — view enroute trucks and the garbage types
   each collects; optional nearby filter (`longitude`, `latitude`, `max_meters`)
+- `GET /api/v1/trucks` — list trucks (collector/logistics; filter by `status`,
+  `availability`, `limit`)
 - `GET /api/v1/trucks/{truck_id}` — read one truck
+- `PATCH /api/v1/trucks/{truck_id}` — edit plate, capacity, garbage types,
+  status, or `operator_id` (logistics/admin; `operator_id: null` unassigns;
+  one collector bound to at most one truck)
+- `DELETE /api/v1/trucks/{truck_id}` — remove a truck (logistics/admin;
+  refused with 409 while it has an assigned planned route)
 
 Collector API:
 
@@ -106,9 +115,10 @@ Collector API:
   and limited to remaining capacity; stops include per-stop distances
 - `POST /api/v1/trucks/{truck_id}/collect-vicinity` — mark posted/scheduled
   garbage within `radius_meters` (default 500) as collected; bumps the
-  truck's load and auto-marks it `full` at capacity
+  truck's load and auto-marks it `full` at capacity (403 unless the truck is
+  assigned to you; logistics/admin bypass)
 - `PATCH /api/v1/trucks/{truck_id}/availability` — set `available`, `working`,
-  or `full` (returning to `available` resets the load)
+  or `full` (returning to `available` resets the load; same 403 rule)
 
 AI (placeholder):
 
@@ -130,6 +140,25 @@ Logistics:
   pass explicit `post_ids`, or omit them to auto-generate from the truck's
   route (type/capacity/proximity); assigned posts flip to `scheduled`
 - `GET /api/v1/logistics/routes` — list assigned routes (by `truck_id`/`status`)
+
+## Road routing (optional)
+
+Route responses carry a `geometry` polyline plus `geometry_source`
+(`"road"` or `"straight"`). Resolution order: self-hosted OSRM (when
+`OSRM_BASE_URL` is set) → OSMnx → straight lines. Any failure at any
+step falls back to the next instead of erroring.
+
+```bash
+# Option A: local OSRM (no extra Python deps; needs Docker + map extract)
+# OSRM_BASE_URL=http://localhost:5000 in .env
+
+# Option B: OSMnx (needs the routing extra + Overpass network access once
+# per area; the street network is cached under var/route-cache/)
+uv pip install -e ".[routing]"   # osmnx + scikit-learn
+```
+
+Without either backend the API returns straight lines with
+`geometry_source: "straight"`.
 
 ## Test
 

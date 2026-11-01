@@ -11,6 +11,7 @@ class GarbageApi {
     required double latitude,
     required List<String> types,
     String? description,
+    String? district,
     String? imageBase64,
     String? imageContentType,
   }) async {
@@ -20,6 +21,7 @@ class GarbageApi {
       'latitude': latitude,
       'types': types,
       if (description != null && description.isNotEmpty) 'description': description,
+      if (district != null && district.isNotEmpty) 'district': district,
       if (imageBase64 != null) 'image_base64': imageBase64,
       if (imageContentType != null) 'image_content_type': imageContentType,
     });
@@ -29,6 +31,8 @@ class GarbageApi {
   Future<List<GarbagePost>> listPosts({
     String? userId,
     String? status,
+    String? district,
+    String? country,
     double? longitude,
     double? latitude,
     double maxMeters = 5000,
@@ -37,6 +41,8 @@ class GarbageApi {
     final query = <String, String>{'max_meters': '$maxMeters', 'limit': '$limit'};
     if (userId != null) query['user_id'] = userId;
     if (status != null) query['status'] = status;
+    if (district != null && district.isNotEmpty) query['district'] = district;
+    if (country != null && country.isNotEmpty) query['country'] = country;
     if (longitude != null && latitude != null) {
       query['longitude'] = '$longitude';
       query['latitude'] = '$latitude';

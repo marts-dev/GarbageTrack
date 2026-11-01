@@ -20,6 +20,13 @@ class GeoPoint(BaseModel):
         return self.coordinates[1]
 
 
+class GeoLineString(BaseModel):
+    """GeoJSON LineString. Coordinates are [[lon, lat], ...]."""
+
+    type: Literal["LineString"] = "LineString"
+    coordinates: list[tuple[float, float]] = Field(min_length=2)
+
+
 def geo_point(longitude: float, latitude: float) -> GeoPoint:
     if not -180 <= longitude <= 180:
         raise ValueError("longitude must be between -180 and 180")

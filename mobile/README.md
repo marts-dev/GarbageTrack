@@ -54,15 +54,41 @@ dart run tool/live_check.dart      # expects the API at 127.0.0.1:8000
   trucks, logistics, AI) with bearer tokens and one refresh retry
 - `lib/state/` — session state plus token storage (secure storage with an
   in-memory fallback)
-- `lib/screens/` — login/register, resident home (location, reports, enroute
-  trucks, classifier), collector (truck routes, vicinity collect, status),
-  logistics (overview, trucks, facilities CRUD, route assignment), admin users
+- `lib/screens/` — login/register, per-role landings (resident home with
+  location, reports, enroute trucks, classifier; collector with assigned truck,
+  routes, vicinity collect, status; logistics with overview, trucks CRUD
+  (list, create/edit with operator assignment, delete), facilities CRUD,
+  route assignment and deletion), admin tabbed overview
 - `lib/theme/` — centralized light/dark Material 3 theme (green seed)
-- `lib/widgets/geo_map.dart` — reusable read-only OpenStreetMap view
-  (`GarbageMapView`: markers, route polylines, OSM attribution)
+- `lib/widgets/geo_map.dart` — reusable OpenStreetMap view
+  (`GarbageMapView`: markers, route polylines, filled polygons, OSM
+  attribution; optional marker clustering, pin/map taps, and a country
+  fallback viewport)
 - `lib/widgets/location_picker.dart` — tap-to-pick map picker with GPS button
   (`LocationMapPicker`), used by every location form
 - `lib/utils/geo.dart` — GeoPoint (GeoJSON lon/lat) <-> LatLng conversions
+  plus a pure-Dart point-in-polygon test for area selection
+- `lib/utils/country_viewports.dart` — default map viewport per country
+
+## Geo scoping
+
+- Registration asks for a free-text country; it is stored on the user and
+  returned by `/auth/me`. Users without one (legacy accounts) fall back to
+  the world map view.
+- Only residents can report garbage: other roles never see the posting
+  entries, and the API rejects them with 403.
+- New reports accept an optional district/region. The route-create screen
+  filters posted garbage by district (server filter plus a client-side
+  fallback) and scopes candidates to the logistics user's country.
+- Route creation picks one or more depot facilities (any kind; the first
+  pick is the route end shown on the map), shows posted garbage on a
+  marker-clustered OSM map (tap a pin to select it), and offers a
+  tap-the-map mode to place collection points plus a draw-an-area mode that
+  selects every enclosed post as the stop set.
+- Collectors work one truck at a time: logistics assigns a truck operator
+  before the collector can collect or change status on that truck.
+- Route maps draw the API's road-following geometry when present and fall
+  back to straight lines otherwise.
 
 Map tiles come from OpenStreetMap contributors; every map shows the required
 attribution. Keep it visible to comply with the OSM tile usage policy.

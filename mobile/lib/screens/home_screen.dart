@@ -21,6 +21,18 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user!;
+    // Each role lands directly on the screen that shows its capabilities.
+    switch (user.role) {
+      case 'resident':
+        return const ResidentHomeScreen();
+      case 'collector':
+        return const CollectorHomeScreen();
+      case 'logistics':
+        return const LogisticsHomeScreen();
+      case 'admin':
+        break;
+    }
+    // Admins keep the tabbed overview of every area plus user management.
     final tabs = [
       (
         const ResidentHomeScreen(),
@@ -30,32 +42,29 @@ class _HomeScreenState extends State<HomeScreen> {
           label: 'Home',
         ),
       ),
-      if (user.isCollector)
-        (
-          const CollectorHomeScreen(),
-          const NavigationDestination(
-            icon: Icon(Icons.local_shipping_outlined),
-            selectedIcon: Icon(Icons.local_shipping),
-            label: 'Collect',
-          ),
+      (
+        const CollectorHomeScreen(),
+        const NavigationDestination(
+          icon: Icon(Icons.local_shipping_outlined),
+          selectedIcon: Icon(Icons.local_shipping),
+          label: 'Collect',
         ),
-      if (user.isLogistics)
-        (
-          const LogisticsHomeScreen(),
-          const NavigationDestination(
-            icon: Icon(Icons.forklift),
-            label: 'Logistics',
-          ),
+      ),
+      (
+        const LogisticsHomeScreen(),
+        const NavigationDestination(
+          icon: Icon(Icons.forklift),
+          label: 'Logistics',
         ),
-      if (user.isAdmin)
-        (
-          const UsersScreen(),
-          const NavigationDestination(
-            icon: Icon(Icons.group_outlined),
-            selectedIcon: Icon(Icons.group),
-            label: 'Users',
-          ),
+      ),
+      (
+        const UsersScreen(),
+        const NavigationDestination(
+          icon: Icon(Icons.group_outlined),
+          selectedIcon: Icon(Icons.group),
+          label: 'Users',
         ),
+      ),
     ];
     // NavigationBar requires at least two destinations; single-role users
     // get their one screen directly.

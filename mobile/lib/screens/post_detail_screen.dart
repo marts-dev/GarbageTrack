@@ -5,6 +5,7 @@ import '../models/models.dart';
 import '../state/auth_provider.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
+import '../widgets/type_dots.dart';
 import '../widgets/geo_map.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -59,9 +60,18 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              post.types.map(pretty).join(', '),
-                              style: Theme.of(context).textTheme.titleLarge,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  post.types.map(pretty).join(', '),
+                                  style:
+                                      Theme.of(context).textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 4),
+                                TypeDots(post.types, size: 12),
+                              ],
                             ),
                           ),
                           StatusPill(
@@ -78,6 +88,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         ),
                       const SizedBox(height: 8),
                       InfoRow(label: 'Position', value: post.location.short),
+                      if (post.district != null && post.district!.trim().isNotEmpty)
+                        InfoRow(label: 'District', value: post.district!.trim()),
                       if (post.description != null && post.description!.isNotEmpty)
                         InfoRow(label: 'Notes', value: post.description!),
                       InfoRow(

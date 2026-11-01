@@ -55,7 +55,7 @@ void main() {
     final auth = AuthProvider.withUser(User(
       id: 'u1',
       email: 'u@example.com',
-      role: 'collector',
+      role: 'resident',
       isActive: true,
     ));
     await tester.pumpWidget(
@@ -65,7 +65,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Hello, Collector'), findsOneWidget);
+    expect(find.text('Hello, Resident'), findsOneWidget);
   });
 
   testWidgets('admin gets bottom nav with all tabs', (tester) async {

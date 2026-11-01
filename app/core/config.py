@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     admin_email: str | None = None
     admin_password: str | None = None
     cors_origins: list[str] = []
+    routing_cache_dir: str = "var/route-cache"
+    routing_timeout_s: float = 30.0
+    # Optional self-hosted OSRM server (e.g. http://localhost:5000). When set,
+    # road geometry is requested from OSRM first, then OSMnx, then straight lines.
+    osrm_base_url: str | None = None
 
     @field_validator("jwt_secret_key")
     @classmethod

@@ -1,14 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/country_viewports.dart';
+import '../utils/geo.dart';
 import '../widgets/async_view.dart';
+import '../widgets/geo_map.dart';
+import '../widgets/type_dots.dart';
 
 /// Create a collection route for a truck: pick explicit posts, or let the
 /// server auto-generate from the truck's capacity, types, and position.
+///
+/// Logistics picks one or more depot facilities, optionally narrows posted
+/// garbage by garbage type, taps map pins to select stops, and taps the map
+/// to place collection points.
 class RouteCreateScreen extends StatefulWidget {
-  const RouteCreateScreen({super.key});
+  const RouteCreateScreen({super.key, this.tileProvider});
+
+  /// Overrides tile loading (e.g. an offline stub in widget tests).
+  final TileProvider? tileProvider;
 
   @override
   State<RouteCreateScreen> createState() => _RouteCreateScreenState();
@@ -16,9 +29,21 @@ class RouteCreateScreen extends StatefulWidget {
 
 class _RouteCreateScreenState extends State<RouteCreateScreen> {
   final _name = TextEditingController();
+  String? _typeFilter;
   String? _truckId;
   bool _auto = true;
   final _picked = <String>{};
+
+  /// Ordered depot picks: the first-selected depot is the route end.
+  final _depots = <String>[];
+  final _collectionPoints = <GeoPoint>[];
+  bool _addPointsMode = false;
+
+  /// Drawn-area selection: map taps append vertices until the shape closes,
+  /// then enclosed posted garbage becomes the manual stop set.
+  bool _polygonMode = false;
+  final _polygon = <GeoPoint>[];
+  bool _polygonClosed = false;
   bool _busy = false;
 
   @override
@@ -28,17 +53,31 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
   }
 
   Future<void> _submit() async {
-    if (_truckId == null || (!_auto && _picked.isEmpty)) {
-      showError(context, 'Pick a truck${_auto ? '' : ' and at least one post'}');
+    if (_truckId == null) {
+      showError(context, 'Pick a truck');
+      return;
+    }
+    if (_depots.isEmpty) {
+      showError(context, 'Pick at least one depot');
+      return;
+    }
+    if (!_auto && _picked.isEmpty) {
+      showError(context, 'Pick at least one post');
       return;
     }
     setState(() => _busy = true);
     try {
-      await context.read<AuthProvider>().logistics.createRoute(
-            truckId: _truckId!,
-            name: _name.text.trim().isEmpty ? null : _name.text.trim(),
-            postIds: _auto ? null : _picked.toList(),
-          );
+      final auth = context.read<AuthProvider>();
+      await auth.logistics.createRoute(
+        truckId: _truckId!,
+        depotIds: _depots.toList(),
+        name: _name.text.trim().isEmpty ? null : _name.text.trim(),
+        postIds: _auto ? null : _picked.toList(),
+        collectionPoints:
+            _collectionPoints.isEmpty ? null : List.of(_collectionPoints),
+        types: _typeFilter == null ? null : [_typeFilter!],
+        country: auth.country,
+      );
       if (mounted) {
         showOk(context, 'Route assigned');
         Navigator.of(context).pop(true);
@@ -53,6 +92,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final viewport = viewportFor(auth.country);
     return Scaffold(
       appBar: AppBar(title: const Text('New route')),
       body: ListView(
@@ -75,7 +115,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                   ),
                   const SizedBox(height: 12),
                   FutureBuilder(
-                    future: auth.logistics.truckLocations(),
+                    future: auth.trucks.listTrucks(),
                     builder: (context, snapshot) => AsyncView<List<Truck>>(
                       snapshot: snapshot,
                       builder: (context, trucks) => DropdownButtonFormField<String>(
@@ -83,16 +123,105 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Truck',
                         ),
+                        // Two-line menu rows need a taller item slot.
+                        itemHeight: 68,
                         items: [
                           for (final truck in trucks)
                             DropdownMenuItem(
                               value: truck.id,
-                              child: Text(
-                                  '${truck.plateNumber} (${pretty(truck.status)})'),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                      '${truck.plateNumber} (${pretty(truck.status)})'),
+                                  if (truck.garbageTypes.isNotEmpty)
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        TypeDots(truck.garbageTypes),
+                                        const SizedBox(width: 6),
+                                        Flexible(
+                                          child: Text(
+                                            truck.garbageTypes
+                                                .map(pretty)
+                                                .join(', '),
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                ],
+                              ),
                             ),
+                        ],
+                        // Closed field stays a single plate line.
+                        selectedItemBuilder: (context) => [
+                          for (final truck in trucks)
+                            Text(
+                                '${truck.plateNumber} (${pretty(truck.status)})'),
                         ],
                         onChanged: (v) => setState(() => _truckId = v),
                       ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Depots (pick at least one)',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Any facility can serve as a depot. The first pick is the route end.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  FutureBuilder(
+                    future: auth.logistics.listFacilities(limit: 100),
+                    builder: (context, snapshot) => AsyncView<List<Facility>>(
+                      snapshot: snapshot,
+                      onRetry: () => setState(() {}),
+                      builder: (context, facilities) {
+                        if (facilities.isEmpty) {
+                          return const Text(
+                              'No facilities yet — register one first.');
+                        }
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            for (final facility in facilities)
+                              FilterChip(
+                                label: Text(
+                                  '${facility.name} (${pretty(facility.kind)})'
+                                  '${_depots.isNotEmpty && _depots.first == facility.id ? ' · End' : ''}',
+                                ),
+                                selected: _depots.contains(facility.id),
+                                onSelected: (on) => setState(() {
+                                  if (on) {
+                                    if (!_depots.contains(facility.id)) {
+                                      _depots.add(facility.id);
+                                    }
+                                  } else {
+                                    _depots.remove(facility.id);
+                                  }
+                                }),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -109,43 +238,163 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
               onChanged: (v) => setState(() => _auto = v),
             ),
           ),
+          const SizedBox(height: 12),
+          Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Posted garbage',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String?>(
+                    initialValue: _typeFilter,
+                    decoration: const InputDecoration(
+                      labelText: 'Filter by garbage type',
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('All types'),
+                      ),
+                      for (final type in garbageTypes)
+                        DropdownMenuItem<String?>(
+                          value: type,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TypeDot(type),
+                              const SizedBox(width: 8),
+                              Text(pretty(type)),
+                            ],
+                          ),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => _typeFilter = v),
+                  ),
+                  const SizedBox(height: 12),
+                  _PostsMap(
+                    key: ValueKey((
+                      _typeFilter,
+                      _truckId,
+                      _depots.isEmpty ? null : _depots.first,
+                    )),
+                    typeFilter: _typeFilter,
+                    picked: _picked,
+                    collectionPoints: _collectionPoints,
+                    addPointsMode: _addPointsMode,
+                    polygonMode: _polygonMode,
+                    polygon: _polygon,
+                    truckId: _truckId,
+                    endDepotId: _depots.isEmpty ? null : _depots.first,
+                    fallbackCenter: viewport.center,
+                    fallbackZoom: viewport.zoom,
+                    tileProvider: widget.tileProvider,
+                    onTogglePost: (post) => setState(() {
+                      if (_picked.contains(post.id)) {
+                        _picked.remove(post.id);
+                      } else {
+                        _picked.add(post.id);
+                      }
+                    }),
+                    onAddPoint: (point) =>
+                        setState(() => _collectionPoints.add(point)),
+                    onAddVertex: (point) => setState(() {
+                      _polygonClosed = false;
+                      _polygon.add(point);
+                    }),
+                  ),
+                  _PolygonPanel(
+                    key: ValueKey(_typeFilter),
+                    typeFilter: _typeFilter,
+                    polygonMode: _polygonMode,
+                    polygon: _polygon,
+                    polygonClosed: _polygonClosed,
+                    onToggleMode: (v) => setState(() {
+                      _polygonMode = v;
+                      // Draw mode and tap-to-add mode are mutually exclusive.
+                      if (v) _addPointsMode = false;
+                    }),
+                    onUndo: () => setState(() {
+                      if (_polygon.isNotEmpty) _polygon.removeLast();
+                      _polygonClosed = false;
+                    }),
+                    onClear: () => setState(() {
+                      _polygon.clear();
+                      _polygonClosed = false;
+                    }),
+                    onEdit: () => setState(() => _polygonClosed = false),
+                    onClose: (enclosedIds) {
+                      if (enclosedIds.isEmpty) {
+                        showError(context, 'No posted garbage inside the area');
+                        return;
+                      }
+                      setState(() {
+                        _polygonClosed = true;
+                        // The drawn area submits through the manual path.
+                        _auto = false;
+                        _picked
+                          ..clear()
+                          ..addAll(enclosedIds);
+                      });
+                    },
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Tap map to add collection points'),
+                    subtitle: Text(_addPointsMode
+                        ? 'Map taps place a collection point.'
+                        : 'Pin taps ${_auto ? 'highlight posts' : 'select stops'}.'),
+                    value: _addPointsMode,
+                    onChanged: (v) => setState(() {
+                      _addPointsMode = v;
+                      if (v) _polygonMode = false;
+                    }),
+                  ),
+                  if (_collectionPoints.isNotEmpty) ...[
+                    Text(
+                      'Collection points (${_collectionPoints.length})',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    for (var i = 0; i < _collectionPoints.length; i++)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        leading: Icon(
+                          Icons.flag,
+                          color: Theme.of(context).colorScheme.tertiary,
+                        ),
+                        title: Text(_collectionPoints[i].short),
+                        trailing: IconButton(
+                          tooltip: 'Remove collection point',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () =>
+                              setState(() => _collectionPoints.removeAt(i)),
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ),
           if (!_auto) ...[
             const SizedBox(height: 12),
             Text('Pick posts', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            FutureBuilder(
-              future: auth.logistics.listAllPosts(status: 'posted'),
-              builder: (context, snapshot) => AsyncView<List<GarbagePost>>(
-                snapshot: snapshot,
-                builder: (context, posts) {
-                  if (posts.isEmpty) {
-                    return const EmptyState(
-                      icon: Icons.inbox_outlined,
-                      title: 'No posted garbage right now.',
-                    );
-                  }
-                  return Column(
-                    children: [
-                      for (final post in posts)
-                        Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: CheckboxListTile(
-                            title: Text(post.types.map(pretty).join(', ')),
-                            subtitle: Text(post.location.short),
-                            value: _picked.contains(post.id),
-                            onChanged: (on) => setState(() {
-                              if (on == true) {
-                                _picked.add(post.id);
-                              } else {
-                                _picked.remove(post.id);
-                              }
-                            }),
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
+            _PostsList(
+              key: ValueKey(('list', _typeFilter)),
+              typeFilter: _typeFilter,
+              picked: _picked,
+              onToggle: (post, on) => setState(() {
+                if (on) {
+                  _picked.add(post.id);
+                } else {
+                  _picked.remove(post.id);
+                }
+              }),
             ),
           ],
           const SizedBox(height: 16),
@@ -157,6 +406,383 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                 : const Text('Assign route'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Loads posted garbage and narrows it to the selected garbage type
+/// (client-side; null shows everything). Shared loader for map and list.
+Future<List<GarbagePost>> _loadPosted(
+    AuthProvider auth, String? typeFilter) async {
+  final posts = await auth.logistics.listAllPosts(
+    status: 'posted',
+    country: auth.country,
+    limit: 200,
+  );
+  if (typeFilter == null) return posts;
+  return posts.where((p) => p.types.contains(typeFilter)).toList();
+}
+
+/// Posted garbage plus the route endpoints: the selected truck's position
+/// (route start) and the first-selected depot (route end).
+class _MapData {
+  const _MapData({required this.posts, this.truckStart, this.endDepot});
+
+  final List<GarbagePost> posts;
+  final GeoPoint? truckStart;
+  final Facility? endDepot;
+}
+
+Future<_MapData> _loadMapData(
+  AuthProvider auth,
+  String? typeFilter,
+  String? truckId,
+  String? endDepotId,
+) async {
+  final posts = await _loadPosted(auth, typeFilter);
+  GeoPoint? truckStart;
+  if (truckId != null) {
+    final trucks = await auth.trucks.listTrucks();
+    for (final truck in trucks) {
+      if (truck.id == truckId) {
+        truckStart = truck.currentLocation;
+        break;
+      }
+    }
+  }
+  Facility? endDepot;
+  if (endDepotId != null) {
+    final facilities = await auth.logistics.listFacilities(limit: 100);
+    for (final facility in facilities) {
+      if (facility.id == endDepotId) {
+        endDepot = facility;
+        break;
+      }
+    }
+  }
+  return _MapData(posts: posts, truckStart: truckStart, endDepot: endDepot);
+}
+
+/// Clustered map of posted garbage. Tapping a pin toggles selection (unless
+/// a draw mode is on); tapping empty map area adds a collection point when
+/// [addPointsMode] is on, or a polygon vertex when [polygonMode] is on.
+///
+/// The load future is created once per [key]: vertex taps, picks, and mode
+/// toggles rebuild with the same future so the map element (and its camera)
+/// survives them instead of flashing back to a loader.
+class _PostsMap extends StatefulWidget {
+  const _PostsMap({
+    super.key,
+    required this.typeFilter,
+    required this.picked,
+    required this.collectionPoints,
+    required this.addPointsMode,
+    required this.polygonMode,
+    required this.polygon,
+    required this.truckId,
+    required this.endDepotId,
+    required this.fallbackCenter,
+    required this.fallbackZoom,
+    required this.onTogglePost,
+    required this.onAddPoint,
+    required this.onAddVertex,
+    this.tileProvider,
+  });
+
+  final String? typeFilter;
+  final Set<String> picked;
+  final List<GeoPoint> collectionPoints;
+  final bool addPointsMode;
+  final bool polygonMode;
+  final List<GeoPoint> polygon;
+  final String? truckId;
+  final String? endDepotId;
+  final LatLng fallbackCenter;
+  final double fallbackZoom;
+  final ValueChanged<GarbagePost> onTogglePost;
+  final ValueChanged<GeoPoint> onAddPoint;
+  final ValueChanged<GeoPoint> onAddVertex;
+  final TileProvider? tileProvider;
+
+  @override
+  State<_PostsMap> createState() => _PostsMapState();
+}
+
+class _PostsMapState extends State<_PostsMap> {
+  late final Future<_MapData> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _loadMapData(
+      context.read<AuthProvider>(),
+      widget.typeFilter,
+      widget.truckId,
+      widget.endDepotId,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return FutureBuilder(
+      future: _future,
+      builder: (context, snapshot) => AsyncView<_MapData>(
+        snapshot: snapshot,
+        builder: (context, data) {
+          final posts = data.posts;
+          final truckStart = data.truckStart;
+          final endDepot = data.endDepot;
+          final polygon = widget.polygon;
+          if (posts.isEmpty &&
+              widget.collectionPoints.isEmpty &&
+              truckStart == null &&
+              endDepot == null &&
+              polygon.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text('No posted garbage right now.'),
+            );
+          }
+          return GarbageMapView(
+            height: 260,
+            clustered: true,
+            tileProvider: widget.tileProvider,
+            fallbackCenter: widget.fallbackCenter,
+            fallbackZoom: widget.fallbackZoom,
+            markers: [
+              for (final post in posts)
+                MapMarkerData(
+                  point: post.location,
+                  icon: widget.picked.contains(post.id)
+                      ? Icons.check_circle
+                      : Icons.location_on,
+                  color: widget.picked.contains(post.id)
+                      ? scheme.tertiary
+                      : post.types.isEmpty
+                          ? null
+                          : garbageTypeColor(
+                              post.types.first, scheme.brightness),
+                  label:
+                      '${post.types.map(pretty).join(', ')} · ${post.district ?? 'No district'}',
+                ),
+              for (final point in widget.collectionPoints)
+                MapMarkerData(
+                  point: point,
+                  icon: Icons.flag,
+                  color: scheme.tertiary,
+                  label: 'Collection point',
+                ),
+              if (truckStart != null)
+                MapMarkerData(
+                  point: truckStart,
+                  icon: Icons.local_shipping,
+                  color: scheme.primary,
+                  label: 'Start: truck position',
+                ),
+              if (endDepot != null)
+                MapMarkerData(
+                  point: endDepot.location,
+                  icon: Icons.home_work,
+                  color: scheme.secondary,
+                  label: 'End: ${endDepot.name}',
+                ),
+            ],
+            overlayMarkers: [
+              for (final vertex in polygon)
+                MapMarkerData(
+                  point: vertex,
+                  icon: Icons.circle,
+                  color: scheme.tertiary,
+                  label: 'Area vertex',
+                ),
+            ],
+            polygons: polygon.length >= 3 ? [List.of(polygon)] : const [],
+            // In draw modes marker taps are disabled so a pin tap can never
+            // also drop a point underneath it.
+            onMarkerTap: (widget.addPointsMode || widget.polygonMode)
+                ? null
+                : (index) {
+                    if (index < posts.length) {
+                      widget.onTogglePost(posts[index]);
+                    }
+                  },
+            onMapTap: widget.polygonMode
+                ? (ll) => widget.onAddVertex(ll.geoPoint)
+                : (widget.addPointsMode
+                    ? (ll) => widget.onAddPoint(ll.geoPoint)
+                    : null),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Drawn-area selection controls: toggle draw mode, edit vertices, and close
+/// the shape to select the enclosed posts. The live inside-count loads the
+/// same posted list as the map and tests inclusion client-side. The future
+/// is created once per [key] so vertex taps never reload the count.
+class _PolygonPanel extends StatefulWidget {
+  const _PolygonPanel({
+    super.key,
+    required this.typeFilter,
+    required this.polygonMode,
+    required this.polygon,
+    required this.polygonClosed,
+    required this.onToggleMode,
+    required this.onUndo,
+    required this.onClear,
+    required this.onEdit,
+    required this.onClose,
+  });
+
+  final String? typeFilter;
+  final bool polygonMode;
+  final List<GeoPoint> polygon;
+  final bool polygonClosed;
+  final ValueChanged<bool> onToggleMode;
+  final VoidCallback onUndo;
+  final VoidCallback onClear;
+  final VoidCallback onEdit;
+  final ValueChanged<List<String>> onClose;
+
+  @override
+  State<_PolygonPanel> createState() => _PolygonPanelState();
+}
+
+class _PolygonPanelState extends State<_PolygonPanel> {
+  late final Future<List<GarbagePost>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _loadPosted(context.read<AuthProvider>(), widget.typeFilter);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final polygon = widget.polygon;
+    final polygonClosed = widget.polygonClosed;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (widget.polygonMode)
+              FilledButton.tonal(
+                onPressed: () => widget.onToggleMode(false),
+                child: const Text('Drawing area'),
+              )
+            else
+              OutlinedButton(
+                onPressed: () => widget.onToggleMode(true),
+                child: const Text('Draw area'),
+              ),
+            if (polygon.isNotEmpty && !polygonClosed) ...[
+              OutlinedButton(
+                  onPressed: widget.onUndo, child: const Text('Undo')),
+              OutlinedButton(
+                  onPressed: widget.onClear, child: const Text('Clear')),
+            ],
+            if (polygonClosed)
+              OutlinedButton(
+                  onPressed: widget.onEdit, child: const Text('Edit area')),
+          ],
+        ),
+        if (polygon.isNotEmpty)
+          FutureBuilder(
+            future: _future,
+            builder: (context, snapshot) => AsyncView<List<GarbagePost>>(
+              snapshot: snapshot,
+              builder: (context, posts) {
+                final enclosed = polygon.length >= 3
+                    ? [
+                        for (final post in posts)
+                          if (pointInPolygon(post.location, polygon)) post,
+                      ]
+                    : <GarbagePost>[];
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 8),
+                    Text(
+                      '${polygon.length} vertices · ${enclosed.length} posts inside',
+                    ),
+                    if (!polygonClosed) ...[
+                      const SizedBox(height: 8),
+                      FilledButton(
+                        onPressed: polygon.length >= 3
+                            ? () => widget
+                                .onClose([for (final p in enclosed) p.id])
+                            : null,
+                        child: const Text('Close shape'),
+                      ),
+                    ],
+                  ],
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Checkbox list of posted garbage for manual stop picking.
+class _PostsList extends StatelessWidget {
+  const _PostsList({
+    super.key,
+    required this.typeFilter,
+    required this.picked,
+    required this.onToggle,
+  });
+
+  final String? typeFilter;
+  final Set<String> picked;
+  final void Function(GarbagePost post, bool on) onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    return FutureBuilder(
+      future: _loadPosted(auth, typeFilter),
+      builder: (context, snapshot) => AsyncView<List<GarbagePost>>(
+        snapshot: snapshot,
+        builder: (context, posts) {
+          if (posts.isEmpty) {
+            return const EmptyState(
+              icon: Icons.inbox_outlined,
+              title: 'No posted garbage right now.',
+            );
+          }
+          return Column(
+            children: [
+              for (final post in posts)
+                Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: CheckboxListTile(
+                    title: Row(
+                      children: [
+                        Expanded(
+                            child: Text(post.types.map(pretty).join(', '))),
+                        TypeDots(post.types),
+                      ],
+                    ),
+                    subtitle: Text(
+                        '${post.district ?? 'No district'} · ${post.location.short}'),
+                    value: picked.contains(post.id),
+                    onChanged: (on) => onToggle(post, on == true),
+                  ),
+                ),
+            ],
+          );
+        },
       ),
     );
   }

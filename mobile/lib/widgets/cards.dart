@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
+import 'type_dots.dart';
 
 Color _statusColor(BuildContext context, String status) {
   final scheme = Theme.of(context).colorScheme;
@@ -72,18 +73,27 @@ class PostCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final district = post.district?.trim();
+    final hasDescription =
+        post.description != null && post.description!.isNotEmpty;
     return Card(
       child: ListTile(
         leading: CardIcon(
           icon: post.hasImage ? Icons.image_outlined : Icons.delete_outline,
           status: post.status,
         ),
-        title: Text(post.types.map(pretty).join(', ')),
+        title: Row(
+          children: [
+            Expanded(child: Text(post.types.map(pretty).join(', '))),
+            TypeDots(post.types),
+          ],
+        ),
         subtitle: Text(
           '${pretty(post.status)} · ${post.location.short}'
-          '${post.description != null && post.description!.isNotEmpty ? '\n${post.description}' : ''}',
+          '${district != null && district.isNotEmpty ? ' · $district' : ''}'
+          '${hasDescription ? '\n${post.description}' : ''}',
         ),
-        isThreeLine: post.description != null && post.description!.isNotEmpty,
+        isThreeLine: hasDescription,
         trailing: StatusPill(label: pretty(post.status), status: post.status),
         onTap: onTap,
       ),
@@ -92,10 +102,16 @@ class PostCard extends StatelessWidget {
 }
 
 class TruckCard extends StatelessWidget {
-  const TruckCard({super.key, required this.truck, this.onTap});
+  const TruckCard({super.key, required this.truck, this.onTap, this.badge, this.action});
 
   final Truck truck;
   final VoidCallback? onTap;
+
+  /// Optional status pill shown under the subtitle.
+  final Widget? badge;
+
+  /// Optional action button shown next to [badge].
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -105,16 +121,41 @@ class TruckCard extends StatelessWidget {
       if (truck.etaMinutes != null) 'ETA ${truck.etaMinutes} min',
       if (truck.capacity != null) 'Load ${truck.load}/${truck.capacity}',
     ].join(' · ');
+    final summary = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(subtitle),
+        const SizedBox(height: 4),
+        TypeChips(truck.garbageTypes),
+      ],
+    );
     return Card(
       child: ListTile(
         leading: const CardIcon(icon: Icons.local_shipping_outlined),
         title: Text(truck.plateNumber),
-        subtitle: Text(
-          '$subtitle\n${truck.garbageTypes.map(pretty).join(', ')}',
-        ),
+        subtitle: badge == null && action == null
+            ? summary
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  summary,
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (badge != null) badge!,
+                      if (action != null) action!,
+                    ],
+                  ),
+                ],
+              ),
         isThreeLine: true,
-        trailing:
-            StatusPill(label: pretty(truck.availability), status: truck.availability),
+        trailing: StatusPill(
+            label: pretty(truck.availability), status: truck.availability),
         onTap: onTap,
       ),
     );

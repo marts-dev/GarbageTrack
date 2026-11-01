@@ -31,6 +31,7 @@ def _to_response(doc: dict) -> UserResponse:
         email=doc["email"],
         full_name=doc.get("full_name"),
         role=role,
+        country=doc.get("country"),
         is_active=doc.get("is_active", True),
         created_at=doc["created_at"],
     )
@@ -42,6 +43,7 @@ async def create_user(
     password: str,
     role: Role,
     full_name: str | None = None,
+    country: str | None = None,
 ) -> UserResponse:
     normalized = email.strip().lower()
     existing = await db[auth_model.COLLECTION].find_one({"email": normalized})
@@ -52,6 +54,7 @@ async def create_user(
         hashed_password=security.hash_password(password),
         full_name=full_name,
         role=role,
+        country=country.strip() if country is not None else None,
     )
     stored = doc.model_dump(by_alias=True, exclude={"id"})
     result = await db[auth_model.COLLECTION].insert_one(stored)
@@ -79,9 +82,15 @@ async def get_user_by_id(db: AsyncDatabase, user_id: str) -> UserResponse:
     return _to_response(stored)
 
 
-async def list_users(db: AsyncDatabase, limit: int = 100) -> list[UserResponse]:
-    cursor = db[auth_model.COLLECTION].find({}).limit(limit)
-    return [_to_response(doc) async for doc in cursor]
+async def list_users(
+    db: AsyncDatabase, limit: int = 100, role: Role | None = None
+) -> list[UserResponse]:
+    if role is None:
+        cursor = db[auth_model.COLLECTION].find({}).limit(limit)
+        return [_to_response(doc) async for doc in cursor]
+    cursor = db[auth_model.COLLECTION].find({})
+    users = [_to_response(doc) async for doc in cursor]
+    return [user for user in users if user.role == role][:limit]
 
 
 async def update_user_role(db: AsyncDatabase, user_id: str, role: Role) -> UserResponse:
@@ -99,17 +108,22 @@ async def update_user_role(db: AsyncDatabase, user_id: str, role: Role) -> UserR
     return _to_response(stored)
 
 
-async def update_profile(db: AsyncDatabase, user_id: str, full_name: str) -> UserResponse:
+async def update_profile(
+    db: AsyncDatabase, user_id: str, full_name: str, country: str | None = None
+) -> UserResponse:
     try:
         object_id = ObjectId(user_id)
     except InvalidId as exc:
         raise UserNotFoundError(user_id) from exc
+    changes: dict = {"full_name": full_name}
+    if country is not None:
+        changes["country"] = country
     stored = await db[auth_model.COLLECTION].find_one_and_update(
-        {"_id": object_id}, {"$set": {"full_name": full_name}}
+        {"_id": object_id}, {"$set": changes}
     )
     if stored is None:
         raise UserNotFoundError(user_id)
-    stored["full_name"] = full_name
+    stored.update(changes)
     return _to_response(stored)
 
 

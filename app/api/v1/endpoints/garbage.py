@@ -19,11 +19,15 @@ OPERATIONAL_ROLES = {Role.COLLECTOR, Role.LOGISTICS, Role.ADMIN}
 
 @router.post("", response_model=GarbagePostResponse, status_code=status.HTTP_201_CREATED)
 async def create_post(payload: GarbagePostCreate, user: CurrentUser, db: Db):
-    if payload.user_id != user.id and user.role != Role.ADMIN:
+    if user.role != Role.RESIDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="only residents can post garbage"
+        )
+    if payload.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="can only post as yourself"
         )
-    return await garbage_service.create_post(db, payload)
+    return await garbage_service.create_post(db, payload, user.country)
 
 
 @router.get("", response_model=list[GarbagePostResponse])
@@ -36,9 +40,13 @@ async def search_posts(
     latitude: Latitude = None,
     max_meters: Annotated[float, Query(gt=0)] = 5000,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    district: str | None = None,
+    country: str | None = None,
 ):
     _ = user
-    return await garbage_service.list_posts(db, user_id, status, longitude, latitude, max_meters, limit)
+    return await garbage_service.list_posts(
+        db, user_id, status, longitude, latitude, max_meters, limit, district, country
+    )
 
 
 @router.get("/{post_id}", response_model=GarbagePostResponse)

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -20,20 +22,102 @@ class MapMarkerData {
   final String? label;
 }
 
-/// Read-only OpenStreetMap view with markers, optional route polylines and
-/// mandatory OSM attribution. Renders on web and Android.
-class GarbageMapView extends StatelessWidget {
+/// One rendered pin group: either a single marker or a cluster of markers
+/// whose pins would overlap at the current zoom.
+class MarkerCluster {
+  const MarkerCluster({required this.memberIndices, required this.center});
+
+  /// Indices into the [GarbageMapView.markers] list.
+  final List<int> memberIndices;
+
+  /// Average position of the members.
+  final LatLng center;
+
+  bool get isSingle => memberIndices.length == 1;
+}
+
+/// Groups marker indices whose pins fall within [radiusPx] screen pixels of
+/// each other at [zoom], using web-mercator projection. Pure function so it
+/// can be unit tested without a map.
+List<MarkerCluster> clusterMarkers(
+  List<MapMarkerData> markers, {
+  required double zoom,
+  double radiusPx = 60,
+}) {
+  final points = [for (final m in markers) m.point.latLng];
+  final projected = [for (final p in points) _project(p, zoom)];
+  final unassigned = [for (var i = 0; i < markers.length; i++) i];
+  final clusters = <MarkerCluster>[];
+  while (unassigned.isNotEmpty) {
+    final seed = unassigned.removeAt(0);
+    final members = [seed];
+    unassigned.removeWhere((i) {
+      final dx = projected[i].x - projected[seed].x;
+      final dy = projected[i].y - projected[seed].y;
+      if (dx * dx + dy * dy <= radiusPx * radiusPx) {
+        members.add(i);
+        return true;
+      }
+      return false;
+    });
+    var lat = 0.0;
+    var lng = 0.0;
+    for (final i in members) {
+      lat += points[i].latitude;
+      lng += points[i].longitude;
+    }
+    clusters.add(MarkerCluster(
+      memberIndices: members,
+      center: LatLng(lat / members.length, lng / members.length),
+    ));
+  }
+  return clusters;
+}
+
+math.Point<double> _project(LatLng ll, double zoom) {
+  final scale = 256.0 * math.pow(2, zoom).toDouble();
+  final x = (ll.longitude + 180.0) / 360.0 * scale;
+  final sinLat = math.sin(ll.latitude * math.pi / 180.0).clamp(-0.9999, 0.9999);
+  final y = (0.5 - math.log((1 + sinLat) / (1 - sinLat)) / (4 * math.pi)) * scale;
+  return math.Point(x, y);
+}
+
+/// Read-only OpenStreetMap view with markers, optional route polylines,
+/// optional filled polygons and mandatory OSM attribution. Renders on web
+/// and Android.
+///
+/// Pass [clustered] to merge nearby pins into countable badges (re-clustered
+/// on every zoom change), [onMarkerTap] to make pins tappable (by marker
+/// index), and [onMapTap] to receive taps on empty map area.
+class GarbageMapView extends StatefulWidget {
   const GarbageMapView({
     super.key,
     required this.markers,
+    this.overlayMarkers = const [],
     this.polylines = const [],
+    this.polygons = const [],
     this.height = 220,
     this.initialZoom = 14,
     this.tileProvider,
+    this.clustered = false,
+    this.onMarkerTap,
+    this.onMapTap,
+    this.fallbackCenter,
+    this.fallbackZoom,
   });
 
   final List<MapMarkerData> markers;
+
+  /// Extra pins drawn singly on top: never clustered and never part of the
+  /// camera fit (e.g. in-progress polygon vertices).
+  final List<MapMarkerData> overlayMarkers;
+
   final List<List<GeoPoint>> polylines;
+
+  /// Filled areas (e.g. the route-create selection polygon). Rings with
+  /// fewer than 3 points are skipped.
+  final List<List<GeoPoint>> polygons;
+
   final double height;
   final double initialZoom;
 
@@ -41,36 +125,116 @@ class GarbageMapView extends StatelessWidget {
   /// Defaults to the standard network tile provider.
   final TileProvider? tileProvider;
 
+  /// Merge nearby pins into count badges. Defaults to off so single-pin
+  /// screens keep their exact current rendering.
+  final bool clustered;
+
+  /// Called with the marker index when a pin is tapped. Null keeps pins
+  /// non-interactive.
+  final ValueChanged<int>? onMarkerTap;
+
+  /// Called with the tapped position. Null keeps the map itself
+  /// non-interactive.
+  final ValueChanged<LatLng>? onMapTap;
+
+  /// Map center/zoom used when [markers] is empty, e.g. the user's country
+  /// viewport. Defaults to the world view.
+  final LatLng? fallbackCenter;
+  final double? fallbackZoom;
+
+  @override
+  State<GarbageMapView> createState() => _GarbageMapViewState();
+}
+
+class _GarbageMapViewState extends State<GarbageMapView> {
+  late final MapController _controller;
+  double? _zoom;
+
+  /// Last marker set the camera fit was computed from. The fit object is
+  /// rebuilt only when the coordinates actually change: rebuilding it on
+  /// every parent setState would make flutter_map refit (and visibly move)
+  /// the camera on each rebuild.
+  List<LatLng>? _fitPoints;
+  CameraFit? _fit;
+
+  static bool _samePoints(List<LatLng> a, List<LatLng>? b) {
+    if (b == null || a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = MapController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onMapEvent(MapEvent event) {
+    if (_zoom != event.camera.zoom) {
+      setState(() => _zoom = event.camera.zoom);
+    }
+  }
+
+  void _zoomInto(LatLng center) {
+    final zoom = math.min((_zoom ?? widget.initialZoom) + 2, 18.0);
+    _controller.move(center, zoom);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final points = markers.map((m) => m.point.latLng).toList();
-    final lines = polylines.where((line) => line.length >= 2).toList();
+    final points = widget.markers.map((m) => m.point.latLng).toList();
+    final lines = widget.polylines.where((line) => line.length >= 2).toList();
+    final areas = widget.polygons.where((ring) => ring.length >= 3).toList();
+    final emptyCenter = widget.fallbackCenter ?? const LatLng(0, 0);
+    final emptyZoom = widget.fallbackZoom ?? 2;
+    if (!_samePoints(points, _fitPoints)) {
+      _fitPoints = List.of(points);
+      _fit = points.length > 1
+          ? CameraFit.coordinates(
+              coordinates: points,
+              padding: const EdgeInsets.all(32),
+              maxZoom: 15,
+            )
+          : null;
+    }
+
+    final clusters = widget.clustered && widget.markers.length > 1
+        ? clusterMarkers(widget.markers, zoom: _zoom ?? widget.initialZoom)
+        : [
+            for (var i = 0; i < widget.markers.length; i++)
+              MarkerCluster(memberIndices: [i], center: points[i]),
+          ];
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: SizedBox(
-        height: height,
+        height: widget.height,
         child: FlutterMap(
+          mapController: _controller,
           options: MapOptions(
-            initialCenter: points.isEmpty ? const LatLng(0, 0) : points.first,
-            initialZoom: points.isEmpty ? 2 : initialZoom,
-            initialCameraFit: points.length > 1
-                ? CameraFit.coordinates(
-                    coordinates: points,
-                    padding: const EdgeInsets.all(32),
-                    maxZoom: 15,
-                  )
-                : null,
+            initialCenter: points.isEmpty ? emptyCenter : points.first,
+            initialZoom: points.isEmpty ? emptyZoom : widget.initialZoom,
+            initialCameraFit: _fit,
             interactionOptions: const InteractionOptions(
               flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
             ),
+            onMapEvent: _onMapEvent,
+            onTap: widget.onMapTap == null ? null : (_, ll) => widget.onMapTap!(ll),
           ),
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.garbagetrack.garbagetrack',
-              tileProvider: tileProvider,
+              tileProvider: widget.tileProvider,
             ),
             if (lines.isNotEmpty)
               PolylineLayer(
@@ -83,18 +247,67 @@ class GarbageMapView extends StatelessWidget {
                     ),
                 ],
               ),
+            if (areas.isNotEmpty)
+              PolygonLayer(
+                polygons: [
+                  for (final ring in areas)
+                    Polygon(
+                      points: ring.map((p) => p.latLng).toList(),
+                      borderStrokeWidth: 2,
+                      borderColor: scheme.tertiary,
+                      color: scheme.tertiary.withValues(alpha: 0.2),
+                    ),
+                ],
+              ),
             MarkerLayer(
               markers: [
-                for (final marker in markers)
+                for (final cluster in clusters)
+                  if (cluster.isSingle)
+                    Marker(
+                      point: cluster.center,
+                      width: 40,
+                      height: 40,
+                      child: _Tappable(
+                        onTap: widget.onMarkerTap == null
+                            ? null
+                            : () => widget.onMarkerTap!(cluster.memberIndices.single),
+                        child: Tooltip(
+                          message: widget.markers[cluster.memberIndices.single].label ??
+                              widget.markers[cluster.memberIndices.single].point.short,
+                          child: MapPin(
+                            icon: widget.markers[cluster.memberIndices.single].icon,
+                            color: widget.markers[cluster.memberIndices.single].color ??
+                                scheme.primary,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Marker(
+                      point: cluster.center,
+                      width: 44,
+                      height: 44,
+                      child: _Tappable(
+                        onTap: () => _zoomInto(cluster.center),
+                        child: Tooltip(
+                          message: '${cluster.memberIndices.length} reports',
+                          child: ClusterBadge(
+                            count: cluster.memberIndices.length,
+                            color: scheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                for (final overlay in widget.overlayMarkers)
                   Marker(
-                    point: marker.point.latLng,
+                    point: overlay.point.latLng,
                     width: 40,
                     height: 40,
                     child: Tooltip(
-                      message: marker.label ?? marker.point.short,
+                      message: overlay.label ?? overlay.point.short,
                       child: MapPin(
-                        icon: marker.icon,
-                        color: marker.color ?? scheme.primary,
+                        icon: overlay.icon,
+                        color: overlay.color ?? scheme.primary,
                       ),
                     ),
                   ),
@@ -109,6 +322,20 @@ class GarbageMapView extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Gesture wrapper that stays out of the tree when [onTap] is null.
+class _Tappable extends StatelessWidget {
+  const _Tappable({required this.child, this.onTap});
+
+  final Widget child;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (onTap == null) return child;
+    return GestureDetector(onTap: onTap, child: child);
   }
 }
 
@@ -133,6 +360,40 @@ class MapPin extends StatelessWidget {
         ],
       ),
       child: Icon(icon, color: Colors.white, size: 20),
+    );
+  }
+}
+
+/// Circular count badge for a cluster of pins, styled like [MapPin].
+class ClusterBadge extends StatelessWidget {
+  const ClusterBadge({super.key, required this.count, required this.color});
+
+  final int count;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2.5),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+        ],
+      ),
+      child: Center(
+        child: Text(
+          '$count',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+      ),
     );
   }
 }

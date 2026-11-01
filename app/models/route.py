@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.models.common import MongoDocument, PyObjectId, utcnow
 from app.models.garbage import GarbageType
-from app.models.geo import GeoPoint
+from app.models.geo import GeoLineString, GeoPoint
 
 COLLECTION = "planned_routes"
 
@@ -31,5 +31,9 @@ class PlannedRouteDocument(MongoDocument):
     name: str | None = None
     origin: GeoPoint
     stops: list[PlannedStop] = Field(min_length=1)
+    depot_ids: list[PyObjectId] = Field(min_length=1)
+    collection_points: list[GeoPoint] = Field(default_factory=list)
     status: PlannedRouteStatus = PlannedRouteStatus.ASSIGNED
+    geometry: GeoLineString | None = None
+    geometry_source: str = "straight"
     created_at: datetime = Field(default_factory=utcnow)

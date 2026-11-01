@@ -59,10 +59,12 @@ class ResidentHomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
+    final canReport = user?.isResident ?? false;
     final entries = [
       (Icons.my_location_outlined, 'My location', 'Save your GPS position', const LocationScreen()),
-      (Icons.add_a_photo_outlined, 'Report garbage', 'Post waste for collection',
-          const NewPostScreen()),
+      if (canReport)
+        (Icons.add_a_photo_outlined, 'Report garbage', 'Post waste for collection',
+            const NewPostScreen()),
       (Icons.list_alt_outlined, 'My reports', 'Track and confirm pickups', const PostsScreen()),
       (Icons.local_shipping_outlined, 'Trucks nearby', 'See enroute collections',
           const EnrouteScreen()),

@@ -27,6 +27,8 @@ def _to_response(doc: dict) -> GarbagePostResponse:
         location=doc["location"],
         types=doc["types"],
         description=doc.get("description"),
+        district=doc.get("district"),
+        country=doc.get("country"),
         has_image=doc.get("image_base64") is not None,
         image_content_type=doc.get("image_content_type"),
         status=doc["status"],
@@ -46,12 +48,16 @@ def _near_filter(longitude: float, latitude: float, max_meters: float) -> dict:
     }
 
 
-async def create_post(db: AsyncDatabase, payload: GarbagePostCreate) -> GarbagePostResponse:
+async def create_post(
+    db: AsyncDatabase, payload: GarbagePostCreate, country: str | None = None
+) -> GarbagePostResponse:
     doc = garbage_model.GarbagePostDocument(
         user_id=payload.user_id,
         location=geo_point(payload.longitude, payload.latitude),
         types=payload.types,
         description=payload.description,
+        district=payload.district,
+        country=country,
         image_base64=payload.image_base64,
         image_content_type=payload.image_content_type,
     )
@@ -80,12 +86,18 @@ async def list_posts(
     latitude: float | None = None,
     max_meters: float = 5000,
     limit: int = 50,
+    district: str | None = None,
+    country: str | None = None,
 ) -> list[GarbagePostResponse]:
     query: dict = {}
     if user_id is not None:
         query["user_id"] = user_id
     if status is not None:
         query["status"] = status.value
+    if district is not None:
+        query["district"] = district
+    if country is not None:
+        query["country"] = country
     if longitude is not None and latitude is not None:
         query.update(_near_filter(longitude, latitude, max_meters))
     cursor = db[garbage_model.COLLECTION].find(query).limit(limit)

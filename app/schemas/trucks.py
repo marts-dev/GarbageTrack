@@ -5,7 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.models.garbage import GarbageStatus, GarbageType
-from app.models.geo import GeoPoint
+from app.models.geo import GeoLineString, GeoPoint
 from app.models.truck import TruckAvailability, TruckStatus
 
 
@@ -34,7 +34,16 @@ class TruckResponse(BaseModel):
     eta_minutes: int | None
     capacity: int | None
     load: int
+    operator_id: str | None = None
     created_at: datetime
+
+
+class TruckUpdate(BaseModel):
+    plate_number: str | None = Field(default=None, min_length=1)
+    capacity: int | None = Field(default=None, ge=1)
+    garbage_types: list[GarbageType] | None = Field(default=None, min_length=1)
+    status: TruckStatus | None = None
+    operator_id: str | None = None
 
 
 class AvailabilityUpdate(BaseModel):
@@ -54,6 +63,8 @@ class CollectionRouteResponse(BaseModel):
     origin: GeoPoint
     remaining_capacity: int | None
     stops: list[RouteStop]
+    geometry: GeoLineString | None = None
+    geometry_source: str = "straight"
 
 
 class CollectVicinityRequest(BaseModel):
