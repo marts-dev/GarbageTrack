@@ -10,6 +10,7 @@ straight polyline and never raises for routing unavailability.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import urllib.request
 from collections import OrderedDict
@@ -17,6 +18,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 from app.models.geo import GeoPoint
@@ -273,9 +276,18 @@ def route_points(
     if effective_osrm:
         try:
             return _osrm_route(lonlats, effective_osrm, effective_timeout)
-        except Exception:  # noqa: BLE001, S110
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("osrm routing failed (%s); trying next backend", exc)
     try:
         return _road_route(lonlats, network_type, effective_timeout, cache_dir)
-    except Exception:  # noqa: BLE001
+    except ImportError as exc:
+        try:
+            import osmnx  # noqa: F401
+        except ImportError:
+            logger.debug("routing extra not installed; using straight lines")
+        else:
+            logger.warning("osmnx routing failed (%s); using straight lines", exc)
+        return straight_route(lonlats)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("osmnx routing failed (%s); using straight lines", exc)
         return straight_route(lonlats)

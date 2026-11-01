@@ -380,6 +380,20 @@ def test_osrm_unreachable_falls_back_to_straight():
     assert len(geom.points) == 2
 
 
+def test_osrm_failure_is_logged(caplog):
+    import logging
+
+    fake_urlopen = MagicMock(side_effect=urllib.error.URLError("down"))
+    with (
+        patch("urllib.request.urlopen", fake_urlopen),
+        caplog.at_level(logging.WARNING, logger="app.services.routing"),
+    ):
+        routing_service.route_points(
+            [(121.0, 14.0), (121.2, 14.2)], osrm_base_url="http://osrm:5000"
+        )
+    assert "osrm routing failed" in caplog.text
+
+
 def test_osrm_empty_geometry_falls_back_to_straight():
     fake_urlopen = _urlopen_with(_osrm_payload(coords=((121.0, 14.0),)))
     with patch("urllib.request.urlopen", fake_urlopen):

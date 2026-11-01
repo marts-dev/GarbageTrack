@@ -20,6 +20,19 @@ def fast_password_hashing():
     settings.password_hash_rounds = 12
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_osrm_from_env():
+    """Keep the suite hermetic: ignore OSRM_BASE_URL from a local .env.
+
+    OSRM-specific tests pass an explicit base URL or patch settings
+    themselves; everything else must behave as if OSRM were unset.
+    """
+    original = settings.osrm_base_url
+    settings.osrm_base_url = None
+    yield
+    settings.osrm_base_url = original
+
+
 @pytest.fixture
 def fake_db() -> FakeDatabase:
     return FakeDatabase()
