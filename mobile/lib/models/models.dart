@@ -18,7 +18,7 @@ const facilityKinds = ['dump_site', 'recycling', 'waste_center'];
 
 const truckStatuses = ['scheduled', 'enroute', 'done'];
 const truckAvailabilities = ['available', 'working', 'full'];
-const garbageStatuses = ['posted', 'scheduled', 'collected'];
+const garbageStatuses = ['posted', 'scheduled', 'pending_confirmation', 'collected'];
 const routeStatuses = ['assigned', 'in_progress', 'done', 'cancelled'];
 
 String pretty(String value) => value
@@ -455,6 +455,36 @@ class GarbageSummary {
         total: (json['total'] as num).toInt(),
         byStatus: (json['by_status'] as Map).map((k, v) => MapEntry(k as String, (v as num).toInt())),
         byType: (json['by_type'] as Map).map((k, v) => MapEntry(k as String, (v as num).toInt())),
+      );
+}
+
+/// The planned-route pickup attributed to a post: the truck that swept it
+/// and the route it rode on. Returned by `GET /garbage/{id}/collection`.
+class CollectionAssignment {
+  final String truckId;
+  final String plateNumber;
+  final String truckStatus;
+  final String routeId;
+  final String? routeName;
+  final String routeStatus;
+
+  CollectionAssignment({
+    required this.truckId,
+    required this.plateNumber,
+    required this.truckStatus,
+    required this.routeId,
+    required this.routeStatus,
+    this.routeName,
+  });
+
+  factory CollectionAssignment.fromJson(Map<String, dynamic> json) =>
+      CollectionAssignment(
+        truckId: json['truck_id'] as String,
+        plateNumber: json['plate_number'] as String,
+        truckStatus: json['truck_status'] as String,
+        routeId: json['route_id'] as String,
+        routeStatus: json['route_status'] as String,
+        routeName: json['route_name'] as String?,
       );
 }
 

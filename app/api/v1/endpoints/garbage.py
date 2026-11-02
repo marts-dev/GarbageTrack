@@ -5,9 +5,19 @@ from fastapi import APIRouter, HTTPException, Query, status
 from app.api.deps import CurrentUser, Db
 from app.models.auth import Role
 from app.models.garbage import GarbageStatus
-from app.schemas.garbage import GarbagePostCreate, GarbagePostResponse
+from app.schemas.garbage import (
+    CollectionAssignmentResponse,
+    GarbagePostCreate,
+    GarbagePostResponse,
+)
 from app.services import garbage as garbage_service
-from app.services.garbage import GarbageAlreadyCollectedError, GarbagePostNotFoundError
+from app.services.garbage import (
+    GarbageAlreadyCollectedError,
+    GarbageNothingToConfirmError,
+    GarbageNotPendingError,
+    GarbagePostNotFoundError,
+    NoCollectionAssignmentError,
+)
 
 router = APIRouter(prefix="/garbage", tags=["garbage"])
 
@@ -74,3 +84,46 @@ async def confirm_collected(post_id: str, user: CurrentUser, db: Db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="garbage post not found") from None
     except GarbageAlreadyCollectedError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="garbage already collected") from None
+    except GarbageNothingToConfirmError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="nothing to confirm yet") from None
+
+
+@router.patch("/{post_id}/dispute-collected", response_model=GarbagePostResponse)
+async def dispute_collected(post_id: str, user: CurrentUser, db: Db):
+    try:
+        post = await garbage_service.get_post(db, post_id)
+    except GarbagePostNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="garbage post not found") from None
+    if post.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="only the owner can dispute"
+        )
+    try:
+        return await garbage_service.dispute_collected(db, post_id)
+    except GarbagePostNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="garbage post not found") from None
+    except GarbageNotPendingError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="garbage is not pending confirmation"
+        ) from None
+
+
+@router.get("/{post_id}/collection", response_model=CollectionAssignmentResponse)
+async def read_collection_assignment(post_id: str, user: CurrentUser, db: Db):
+    try:
+        post = await garbage_service.get_post(db, post_id)
+    except GarbagePostNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="garbage post not found") from None
+    if post.user_id != user.id and user.role not in OPERATIONAL_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="only the owner or operations can view the collection assignment",
+        )
+    try:
+        return await garbage_service.get_collection_assignment(db, post_id)
+    except GarbagePostNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="garbage post not found") from None
+    except NoCollectionAssignmentError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="no collection assignment for this post"
+        ) from None

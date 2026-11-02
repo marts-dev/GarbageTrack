@@ -62,4 +62,22 @@ class GarbageApi {
     final body = await _client.patchJson('/garbage/$postId/confirm-collected');
     return GarbagePost.fromJson(body as Map<String, dynamic>);
   }
+
+  /// Reopens a pending post as posted (owner only). 409 when not pending.
+  Future<GarbagePost> disputeCollected(String postId) async {
+    final body = await _client.patchJson('/garbage/$postId/dispute-collected');
+    return GarbagePost.fromJson(body as Map<String, dynamic>);
+  }
+
+  /// The planned-route pickup attributed to [postId], or null when the post
+  /// is on no relevant route (404).
+  Future<CollectionAssignment?> getCollection(String postId) async {
+    try {
+      final body = await _client.get('/garbage/$postId/collection');
+      return CollectionAssignment.fromJson(body as Map<String, dynamic>);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
 }

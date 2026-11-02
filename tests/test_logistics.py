@@ -1,9 +1,15 @@
 import pytest
+from bson import ObjectId
 
 
 @pytest.fixture
 def dispatcher(client, make_user):
     return make_user("logistics")
+
+
+def _mark_pending(fake_db, post_id):
+    """Seed the pre-confirm state: collect-vicinity marks posts pending."""
+    fake_db["garbage_posts"].docs[ObjectId(post_id)]["status"] = "pending_confirmation"
 
 
 def _make_post(client, user, **overrides):
@@ -47,12 +53,16 @@ def _make_facility(client, headers, **overrides):
     return response.json()
 
 
-def test_list_all_posts_and_filters(client, dispatcher, make_user):
+def test_list_all_posts_and_filters(client, dispatcher, make_user, fake_db):
     me = make_user()
     other = make_user()
     _make_post(client, me, types=["plastic", "metal"])
     p2 = _make_post(client, other)
-    client.patch(f"/api/v1/garbage/{p2['id']}/confirm-collected", headers=other["headers"])
+    _mark_pending(fake_db, p2["id"])
+    confirmed = client.patch(
+        f"/api/v1/garbage/{p2['id']}/confirm-collected", headers=other["headers"]
+    )
+    assert confirmed.status_code == 200, confirmed.text
 
     all_posts = client.get("/api/v1/logistics/garbage", headers=dispatcher["headers"])
     assert all_posts.status_code == 200
@@ -72,11 +82,15 @@ def test_list_all_posts_and_filters(client, dispatcher, make_user):
     assert len(u2.json()) == 1
 
 
-def test_garbage_summary_counts(client, dispatcher, make_user):
+def test_garbage_summary_counts(client, dispatcher, make_user, fake_db):
     me = make_user()
     _make_post(client, me, types=["plastic", "metal"])
     p2 = _make_post(client, me, types=["plastic"])
-    client.patch(f"/api/v1/garbage/{p2['id']}/confirm-collected", headers=me["headers"])
+    _mark_pending(fake_db, p2["id"])
+    confirmed = client.patch(
+        f"/api/v1/garbage/{p2['id']}/confirm-collected", headers=me["headers"]
+    )
+    assert confirmed.status_code == 200, confirmed.text
 
     response = client.get("/api/v1/logistics/garbage/summary", headers=dispatcher["headers"])
     assert response.status_code == 200
@@ -237,12 +251,16 @@ def test_create_route_auto_uses_truck_route(client, dispatcher, make_user):
     assert body["origin"] == {"type": "Point", "coordinates": [3.37, 6.45]}
 
 
-def test_create_route_errors(client, dispatcher, make_user):
+def test_create_route_errors(client, dispatcher, make_user, fake_db):
     me = make_user()
     truck = _make_truck(client, dispatcher["headers"])
     depot = _make_facility(client, dispatcher["headers"])
     collected = _make_post(client, me)
-    client.patch(f"/api/v1/garbage/{collected['id']}/confirm-collected", headers=me["headers"])
+    _mark_pending(fake_db, collected["id"])
+    confirmed = client.patch(
+        f"/api/v1/garbage/{collected['id']}/confirm-collected", headers=me["headers"]
+    )
+    assert confirmed.status_code == 200, confirmed.text
 
     unknown_truck = client.post(
         "/api/v1/logistics/routes",
@@ -343,7 +361,7 @@ def test_delete_route_releases_stops(client, dispatcher, make_user):
     )
 
 
-def test_delete_route_keeps_collected_untouched(client, dispatcher, make_user):
+def test_delete_route_keeps_collected_untouched(client, dispatcher, make_user, fake_db):
     me = make_user()
     truck = _make_truck(client, dispatcher["headers"])
     depot = _make_facility(client, dispatcher["headers"])
@@ -359,6 +377,7 @@ def test_delete_route_keeps_collected_untouched(client, dispatcher, make_user):
         headers=dispatcher["headers"],
     )
     route_id = created.json()["id"]
+    _mark_pending(fake_db, p1["id"])
     assert (
         client.patch(
             f"/api/v1/garbage/{p1['id']}/confirm-collected", headers=me["headers"]

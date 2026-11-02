@@ -6,10 +6,17 @@ from pymongo import ReturnDocument
 from pymongo.asynchronous.database import AsyncDatabase
 
 from app.models import garbage as garbage_model
+from app.models import route as route_model
+from app.models import truck as truck_model
 from app.models.common import utcnow
 from app.models.garbage import GarbageStatus
 from app.models.geo import geo_point
-from app.schemas.garbage import GarbagePostCreate, GarbagePostResponse
+from app.models.route import PlannedRouteStatus
+from app.schemas.garbage import (
+    CollectionAssignmentResponse,
+    GarbagePostCreate,
+    GarbagePostResponse,
+)
 
 
 class GarbagePostNotFoundError(Exception):
@@ -17,6 +24,18 @@ class GarbagePostNotFoundError(Exception):
 
 
 class GarbageAlreadyCollectedError(Exception):
+    pass
+
+
+class GarbageNothingToConfirmError(Exception):
+    pass
+
+
+class GarbageNotPendingError(Exception):
+    pass
+
+
+class NoCollectionAssignmentError(Exception):
     pass
 
 
@@ -105,12 +124,18 @@ async def list_posts(
 
 
 async def confirm_collected(db: AsyncDatabase, post_id: str) -> GarbagePostResponse:
+    """Confirm a pending pickup: only ``pending_confirmation`` → ``collected``.
+
+    Raises [GarbageNothingToConfirmError] when the post is still
+    posted/scheduled (the collector has not marked it yet) and
+    [GarbageAlreadyCollectedError] when it is already collected.
+    """
     try:
         object_id = ObjectId(post_id)
     except InvalidId as exc:
         raise GarbagePostNotFoundError(post_id) from exc
     stored = await db[garbage_model.COLLECTION].find_one_and_update(
-        {"_id": object_id, "status": {"$in": [GarbageStatus.POSTED.value, GarbageStatus.SCHEDULED.value]}},
+        {"_id": object_id, "status": GarbageStatus.PENDING_CONFIRMATION.value},
         {"$set": {"status": GarbageStatus.COLLECTED.value, "collected_at": utcnow()}},
         return_document=ReturnDocument.AFTER,
     )
@@ -119,4 +144,78 @@ async def confirm_collected(db: AsyncDatabase, post_id: str) -> GarbagePostRespo
     existing = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
     if existing is None:
         raise GarbagePostNotFoundError(post_id)
-    raise GarbageAlreadyCollectedError(post_id)
+    if str(existing["status"]) == GarbageStatus.COLLECTED.value:
+        raise GarbageAlreadyCollectedError(post_id)
+    raise GarbageNothingToConfirmError(post_id)
+
+
+async def dispute_collected(db: AsyncDatabase, post_id: str) -> GarbagePostResponse:
+    """Reopen a pending pickup: ``pending_confirmation`` → ``posted``.
+
+    Clears ``collected_at``; raises [GarbageNotPendingError] when the post
+    is not pending confirmation.
+    """
+    try:
+        object_id = ObjectId(post_id)
+    except InvalidId as exc:
+        raise GarbagePostNotFoundError(post_id) from exc
+    stored = await db[garbage_model.COLLECTION].find_one_and_update(
+        {"_id": object_id, "status": GarbageStatus.PENDING_CONFIRMATION.value},
+        {
+            "$set": {"status": GarbageStatus.POSTED.value},
+            "$unset": {"collected_at": ""},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+    if stored is not None:
+        return _to_response(stored)
+    existing = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
+    if existing is None:
+        raise GarbagePostNotFoundError(post_id)
+    raise GarbageNotPendingError(post_id)
+
+
+async def get_collection_assignment(
+    db: AsyncDatabase, post_id: str
+) -> CollectionAssignmentResponse:
+    """Attribute a post to its most recent relevant planned route + truck.
+
+    Considers routes containing the post with status assigned/in_progress/done
+    (done still attributes the pickup; cancelled is excluded). Raises
+    [NoCollectionAssignmentError] when the post is on no relevant route.
+    """
+    try:
+        object_id = ObjectId(post_id)
+    except InvalidId as exc:
+        raise GarbagePostNotFoundError(post_id) from exc
+    existing = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
+    if existing is None:
+        raise GarbagePostNotFoundError(post_id)
+    candidates = []
+    async for doc in db[route_model.COLLECTION].find(
+        {
+            "status": {
+                "$in": [
+                    PlannedRouteStatus.ASSIGNED.value,
+                    PlannedRouteStatus.IN_PROGRESS.value,
+                    PlannedRouteStatus.DONE.value,
+                ]
+            }
+        }
+    ):
+        if any(stop.get("post_id") == object_id for stop in doc.get("stops", [])):
+            candidates.append(doc)
+    if not candidates:
+        raise NoCollectionAssignmentError(post_id)
+    route_doc = max(candidates, key=lambda d: d.get("created_at"))
+    truck_doc = await db[truck_model.COLLECTION].find_one({"_id": route_doc["truck_id"]})
+    if truck_doc is None:
+        raise NoCollectionAssignmentError(post_id)
+    return CollectionAssignmentResponse(
+        truck_id=str(truck_doc["_id"]),
+        plate_number=truck_doc["plate_number"],
+        truck_status=truck_doc["status"],
+        route_id=str(route_doc["_id"]),
+        route_name=route_doc.get("name"),
+        route_status=route_doc["status"],
+    )

@@ -26,6 +26,7 @@ class GarbageType(StrEnum):
 class GarbageStatus(StrEnum):
     POSTED = "posted"
     SCHEDULED = "scheduled"
+    PENDING_CONFIRMATION = "pending_confirmation"
     COLLECTED = "collected"
 
 

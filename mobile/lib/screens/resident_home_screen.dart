@@ -10,8 +10,18 @@ import 'location_screen.dart';
 import 'new_post_screen.dart';
 import 'posts_screen.dart';
 
-class ResidentHomeScreen extends StatelessWidget {
+class ResidentHomeScreen extends StatefulWidget {
   const ResidentHomeScreen({super.key});
+
+  @override
+  State<ResidentHomeScreen> createState() => _ResidentHomeScreenState();
+}
+
+class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
+  /// Bumped when returning from My reports so the pending badge refetches.
+  /// Popping a route does not otherwise rebuild this screen, so without it
+  /// the badge would keep its stale count after confirming pickups.
+  int _badgeReload = 0;
 
   Future<void> _editName(BuildContext context, User user) async {
     final controller = TextEditingController(text: user.fullName ?? '');
@@ -112,17 +122,58 @@ class ResidentHomeScreen extends StatelessWidget {
                 leading: CardIcon(icon: icon),
                 title: Text(title),
                 subtitle: Text(subtitle),
-                trailing: Icon(
-                  Icons.chevron_right,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (screen is PostsScreen)
+                      _PendingCountBadge(key: ValueKey(_badgeReload)),
+                    Icon(
+                      Icons.chevron_right,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ],
                 ),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => screen),
-                ),
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => screen),
+                  );
+                  if (!mounted || screen is! PostsScreen) return;
+                  setState(() => _badgeReload++);
+                },
               ),
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Count of the signed-in resident's posts awaiting pickup confirmation.
+/// Hidden while loading, on error, when signed out, or when zero.
+class _PendingCountBadge extends StatelessWidget {
+  const _PendingCountBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    final userId = auth.user?.id;
+    if (userId == null) return const SizedBox.shrink();
+    return FutureBuilder(
+      future: auth.garbage.listPosts(
+        userId: userId,
+        status: 'pending_confirmation',
+        limit: 100,
+      ),
+      builder: (context, snapshot) {
+        final count = snapshot.data?.length ?? 0;
+        if (!snapshot.hasData || count == 0) {
+          return const SizedBox.shrink();
+        }
+        return Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Badge.count(count: count),
+        );
+      },
     );
   }
 }

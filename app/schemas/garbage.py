@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 from app.models.garbage import GarbageStatus, GarbageType
 from app.models.geo import GeoPoint
+from app.models.route import PlannedRouteStatus
+from app.models.truck import TruckStatus
 from app.schemas.common import ImagePayload
 
 
@@ -31,3 +33,12 @@ class GarbagePostResponse(BaseModel):
     status: GarbageStatus
     created_at: datetime
     collected_at: datetime | None
+
+
+class CollectionAssignmentResponse(BaseModel):
+    truck_id: str
+    plate_number: str
+    truck_status: TruckStatus
+    route_id: str
+    route_name: str | None
+    route_status: PlannedRouteStatus

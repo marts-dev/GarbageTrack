@@ -7,7 +7,8 @@ Color _statusColor(BuildContext context, String status) {
   final scheme = Theme.of(context).colorScheme;
   return switch (status) {
     'collected' || 'done' => scheme.primary,
-    'scheduled' || 'enroute' || 'working' => scheme.tertiary,
+    'scheduled' || 'pending_confirmation' || 'enroute' || 'working' =>
+      scheme.tertiary,
     'full' => scheme.error,
     _ => scheme.secondary,
   };

@@ -69,6 +69,8 @@ class FakeCollection:
     @staticmethod
     def _apply_update(doc: dict, update: dict) -> None:
         doc.update(update.get("$set", {}))
+        for field in update.get("$unset", {}):
+            doc.pop(field, None)
         for field, amount in update.get("$inc", {}).items():
             doc[field] = doc.get(field, 0) + amount
 
@@ -116,7 +118,7 @@ class FakeCollection:
         _ = kwargs
         for doc in self.docs.values():
             if _matches(doc, query):
-                doc.update(update.get("$set", {}))
+                self._apply_update(doc, update)
                 return doc
         return None
 

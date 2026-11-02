@@ -322,8 +322,8 @@ async def get_truck_planned_route(db: AsyncDatabase, truck_id: str) -> TruckPlan
 
     Raises [TruckNotFoundError] for an unknown truck and [NoPlannedRouteError]
     when the truck has no assigned/in-progress plan. Stops whose posts were
-    collected since planning are filtered out so the collector only follows
-    remaining work; depots are embedded in route order.
+    collected or marked pending since planning are filtered out so the
+    collector only follows remaining work; depots are embedded in route order.
     """
     truck_doc = await _get_truck_doc(db, truck_id)
     candidates = [
@@ -344,14 +344,19 @@ async def get_truck_planned_route(db: AsyncDatabase, truck_id: str) -> TruckPlan
         raise NoPlannedRouteError(truck_id)
     doc = max(candidates, key=lambda d: d.get("created_at"))
     stop_post_ids = [stop["post_id"] for stop in doc.get("stops", [])]
-    collected: set = set()
+    finished: set = set()
     if stop_post_ids:
-        collected = {
+        finished = {
             collection_doc["_id"]
             async for collection_doc in db[garbage_model.COLLECTION].find(
                 {
                     "_id": {"$in": stop_post_ids},
-                    "status": GarbageStatus.COLLECTED.value,
+                    "status": {
+                        "$in": [
+                            GarbageStatus.COLLECTED.value,
+                            GarbageStatus.PENDING_CONFIRMATION.value,
+                        ]
+                    },
                 }
             )
         }
@@ -363,7 +368,7 @@ async def get_truck_planned_route(db: AsyncDatabase, truck_id: str) -> TruckPlan
             distance_meters=stop.get("distance_meters"),
         )
         for stop in doc.get("stops", [])
-        if stop["post_id"] not in collected
+        if stop["post_id"] not in finished
     ]
     depot_ids = doc.get("depot_ids", [])
     depots_by_id = (
@@ -488,7 +493,7 @@ async def collect_vicinity(
                 },
                 {
                     "$set": {
-                        "status": GarbageStatus.COLLECTED.value,
+                        "status": GarbageStatus.PENDING_CONFIRMATION.value,
                         "collected_at": utcnow(),
                     }
                 },

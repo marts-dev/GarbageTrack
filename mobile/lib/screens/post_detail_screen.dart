@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
@@ -9,9 +10,12 @@ import '../widgets/type_dots.dart';
 import '../widgets/geo_map.dart';
 
 class PostDetailScreen extends StatefulWidget {
-  const PostDetailScreen({super.key, required this.postId});
+  const PostDetailScreen({super.key, required this.postId, this.tileProvider});
 
   final String postId;
+
+  /// Overrides map tile loading (offline stub in widget tests).
+  final TileProvider? tileProvider;
 
   @override
   State<PostDetailScreen> createState() => _PostDetailScreenState();
@@ -27,6 +31,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       await context.read<AuthProvider>().garbage.confirmCollected(widget.postId);
       if (mounted) {
         showOk(context, 'Marked as collected');
+        setState(() => _reload++);
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _dispute() async {
+    setState(() => _busy = true);
+    try {
+      await context.read<AuthProvider>().garbage.disputeCollected(widget.postId);
+      if (mounted) {
+        showOk(context, 'Collection disputed');
         setState(() => _reload++);
       }
     } catch (e) {
@@ -96,7 +115,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           label: 'Reported', value: post.createdAt.toLocal().toString()),
                       if (post.collectedAt != null)
                         InfoRow(
-                            label: 'Collected', value: post.collectedAt!.toLocal().toString()),
+                            label: post.status == 'collected'
+                                ? 'Collected'
+                                : 'Picked up',
+                            value: post.collectedAt!.toLocal().toString()),
+                      _CollectionAssignment(postId: post.id),
                     ],
                   ),
                 ),
@@ -104,18 +127,65 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               const SizedBox(height: 12),
               GarbageMapView(
                 markers: [MapMarkerData(point: post.location)],
+                tileProvider: widget.tileProvider,
               ),
               const SizedBox(height: 12),
-              if (post.status != 'collected')
+              // Only a collector-swept (pending) post can be confirmed or
+              // disputed; posted/scheduled have nothing to confirm yet and
+              // collected is final.
+              if (post.status == 'pending_confirmation') ...[
                 FilledButton.icon(
                   onPressed: _busy ? null : _confirm,
                   icon: const Icon(Icons.check_circle_outline),
                   label: const Text('Confirm collected'),
                 ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _dispute,
+                  icon: const Icon(Icons.report_outlined),
+                  label: const Text('Dispute collection'),
+                ),
+              ],
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Truck + route rows for the pickup attributed to a post. Renders nothing
+/// while loading, on error, or when the post is on no relevant route (404).
+class _CollectionAssignment extends StatelessWidget {
+  const _CollectionAssignment({required this.postId});
+
+  final String postId;
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    return FutureBuilder(
+      future: auth.garbage.getCollection(postId),
+      builder: (context, snapshot) {
+        final assignment = snapshot.data;
+        if (!snapshot.hasData || assignment == null) {
+          return const SizedBox.shrink();
+        }
+        return Column(
+          children: [
+            InfoRow(
+              label: 'Truck',
+              value:
+                  '${assignment.plateNumber} · ${pretty(assignment.truckStatus)}',
+            ),
+            InfoRow(
+              label: 'Route',
+              value:
+                  '${assignment.routeName ?? assignment.routeId} · ${pretty(assignment.routeStatus)}',
+            ),
+          ],
+        );
+      },
     );
   }
 }

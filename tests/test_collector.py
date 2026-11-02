@@ -156,10 +156,9 @@ def test_collect_vicinity_marks_posts_and_updates_load(client, dispatcher, colle
     assert body["load"] == 1
     assert body["availability"] == "available"
 
-    assert (
-        client.get(f"/api/v1/garbage/{p1['id']}", headers=resident["headers"]).json()["status"]
-        == "collected"
-    )
+    marked = client.get(f"/api/v1/garbage/{p1['id']}", headers=resident["headers"]).json()
+    assert marked["status"] == "pending_confirmation"
+    assert marked["collected_at"] is not None
 
 
 def test_collect_vicinity_defaults_to_30m_radius():

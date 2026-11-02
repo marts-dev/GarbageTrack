@@ -15,6 +15,28 @@ def _post_payload(user_id, **overrides):
     return payload
 
 
+def _make_truck(client, headers, **overrides):
+    payload = {
+        "plate_number": "TRK-1",
+        "garbage_types": ["plastic", "metal"],
+        "status": "enroute",
+        "current_location": {"longitude": 3.37, "latitude": 6.45},
+        "capacity": 10,
+    }
+    payload.update(overrides)
+    response = client.post("/api/v1/trucks/schedules", json=payload, headers=headers)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _collect(client, truck_id, headers):
+    response = client.post(
+        f"/api/v1/trucks/{truck_id}/collect-vicinity", json={}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def test_create_post_with_multiple_types_and_image(client, make_user, fake_db):
     me = make_user()
     response = client.post(
@@ -103,10 +125,22 @@ def test_list_posts_filters_by_user_and_status(client, make_user):
 
 def test_confirm_collected_transitions_and_conflicts(client, make_user):
     me = make_user()
+    dispatcher = make_user("logistics")
+    truck = _make_truck(client, dispatcher["headers"])
     created = client.post(
         "/api/v1/garbage", json=_post_payload(me["id"]), headers=me["headers"]
     ).json()
     post_id = created["id"]
+
+    too_early = client.patch(
+        f"/api/v1/garbage/{post_id}/confirm-collected", headers=me["headers"]
+    )
+    assert too_early.status_code == 409
+    assert too_early.json()["detail"] == "nothing to confirm yet"
+
+    _collect(client, truck["id"], dispatcher["headers"])
+    pending = client.get(f"/api/v1/garbage/{post_id}", headers=me["headers"]).json()
+    assert pending["status"] == "pending_confirmation"
 
     first = client.patch(f"/api/v1/garbage/{post_id}/confirm-collected", headers=me["headers"])
     assert first.status_code == 200, first.text
@@ -115,6 +149,7 @@ def test_confirm_collected_transitions_and_conflicts(client, make_user):
 
     second = client.patch(f"/api/v1/garbage/{post_id}/confirm-collected", headers=me["headers"])
     assert second.status_code == 409
+    assert second.json()["detail"] == "garbage already collected"
 
     missing = client.patch(
         "/api/v1/garbage/000000000000000000000000/confirm-collected", headers=me["headers"]
@@ -126,6 +161,8 @@ def test_confirm_collected_by_stranger_forbidden_but_collector_allowed(client, m
     me = make_user()
     stranger = make_user()
     collector = make_user("collector")
+    dispatcher = make_user("logistics")
+    truck = _make_truck(client, dispatcher["headers"])
     created = client.post(
         "/api/v1/garbage", json=_post_payload(me["id"]), headers=me["headers"]
     ).json()
@@ -135,7 +172,9 @@ def test_confirm_collected_by_stranger_forbidden_but_collector_allowed(client, m
     )
     assert denied.status_code == 403
 
+    _collect(client, truck["id"], dispatcher["headers"])
     allowed = client.patch(
         f"/api/v1/garbage/{created['id']}/confirm-collected", headers=collector["headers"]
     )
     assert allowed.status_code == 200
+    assert allowed.json()["status"] == "collected"
