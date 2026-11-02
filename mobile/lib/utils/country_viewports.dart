@@ -29,6 +29,30 @@ const _countryViewports = <String, (double, double, double)>{
   'philippines': (12.88, 121.77, 6),
 };
 
+/// Display names for the registration country dropdown. Each entry must
+/// lowercase to a [_countryViewports] key (aliases like `usa` excluded);
+/// a unit test guards this so the dropdown can never offer a country the
+/// maps cannot frame.
+const supportedCountries = [
+  'Australia',
+  'Brazil',
+  'Cameroon',
+  'Canada',
+  'Egypt',
+  'Ethiopia',
+  'France',
+  'Germany',
+  'Ghana',
+  'Hungary',
+  'India',
+  'Kenya',
+  'Nigeria',
+  'Philippines',
+  'South Africa',
+  'United Kingdom',
+  'United States',
+];
+
 /// Looks up [country] case-insensitively; unknown, null, or blank values
 /// fall back to the world view.
 CountryViewport viewportFor(String? country) {

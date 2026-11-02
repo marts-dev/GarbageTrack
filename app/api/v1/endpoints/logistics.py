@@ -57,9 +57,13 @@ async def list_all_posts(
 
 
 @router.get("/garbage/summary", response_model=GarbageSummaryResponse)
-async def garbage_summary(user: Dispatcher, db: Db):
+async def garbage_summary(
+    user: Dispatcher,
+    db: Db,
+    country: Annotated[str | None, Query(max_length=100)] = None,
+):
     _ = user
-    return await logistics_service.garbage_summary(db)
+    return await logistics_service.garbage_summary(db, country)
 
 
 @router.get("/trucks/locations", response_model=list[TruckLocationResponse])

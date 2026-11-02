@@ -205,6 +205,21 @@ Future<void> _selectTruck(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// Picks [name] from the registration country dropdown. The menu only
+/// builds visible items, so items past the fold need a scroll first.
+Future<void> _selectCountry(WidgetTester tester, String name) async {
+  await _scrollTo(tester, find.byType(DropdownButtonFormField<String>));
+  await tester.tap(find.byType(DropdownButtonFormField<String>));
+  await tester.pumpAndSettle();
+  for (var i = 0; i < 10 && find.text(name).evaluate().isEmpty; i++) {
+    await tester.drag(
+        find.byType(DropdownMenuItem<String>).first, const Offset(0, -200));
+    await tester.pumpAndSettle();
+  }
+  await tester.tap(find.text(name).last);
+  await tester.pumpAndSettle();
+}
+
 void main() {
   group('viewportFor', () {
     test('resolves known countries case-insensitively', () {
@@ -222,6 +237,16 @@ void main() {
       expect(viewportFor(null).zoom, 2);
       expect(viewportFor('').center, const LatLng(0, 0));
       expect(viewportFor('Atlantis').center, const LatLng(0, 0));
+    });
+
+    test('dropdown countries all resolve to a viewport', () {
+      expect(supportedCountries, isNotEmpty);
+      for (final name in supportedCountries) {
+        final viewport = viewportFor(name);
+        expect(viewport.center, isNot(const LatLng(0, 0)),
+            reason: '$name has no viewport entry');
+      }
+      expect(supportedCountries, contains('Philippines'));
     });
   });
 
@@ -471,7 +496,7 @@ void main() {
           tester, find.widgetWithText(FilledButton, 'Create account'));
       await tester.tap(find.widgetWithText(FilledButton, 'Create account'));
       await tester.pumpAndSettle();
-      expect(find.text('Enter your country'), findsOneWidget);
+      expect(find.text('Select your country'), findsWidgets);
       expect(find.byType(RegisterScreen), findsOneWidget);
     });
 
@@ -514,10 +539,7 @@ void main() {
       await tester.enterText(
           find.widgetWithText(TextFormField, 'Password (min 8 characters)'),
           'password1');
-      await _scrollTo(
-          tester, find.widgetWithText(TextFormField, 'Country'));
-      await tester.enterText(
-          find.widgetWithText(TextFormField, 'Country'), 'Nigeria');
+      await _selectCountry(tester, 'Nigeria');
       await _scrollTo(
           tester, find.widgetWithText(FilledButton, 'Create account'));
       await tester.tap(find.widgetWithText(FilledButton, 'Create account'));

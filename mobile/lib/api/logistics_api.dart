@@ -25,8 +25,11 @@ class LogisticsApi {
         .toList();
   }
 
-  Future<GarbageSummary> garbageSummary() async {
-    final body = await _client.get('/logistics/garbage/summary');
+  Future<GarbageSummary> garbageSummary({String? country}) async {
+    final body = await _client.get(
+      '/logistics/garbage/summary',
+      query: country == null ? null : {'country': country},
+    );
     return GarbageSummary.fromJson(body as Map<String, dynamic>);
   }
 

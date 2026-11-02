@@ -98,7 +98,77 @@ def test_garbage_summary_counts(client, dispatcher, make_user, fake_db):
         "total": 2,
         "by_status": {"posted": 1, "collected": 1},
         "by_type": {"plastic": 2, "metal": 1},
+        "by_region": {},
     }
+
+
+def test_garbage_summary_groups_by_ph_region(client, dispatcher, make_user):
+    me = make_user()
+    _make_post(client, me, longitude=120.98, latitude=14.59, types=["plastic"])
+    _make_post(client, me, longitude=120.99, latitude=14.60, types=["metal"])
+    _make_post(client, me, longitude=123.89, latitude=10.31, types=["plastic"])
+    _make_post(client, me, longitude=3.37, latitude=6.45, types=["glass"])
+    response = client.get(
+        "/api/v1/logistics/garbage/summary?country=Philippines",
+        headers=dispatcher["headers"],
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # The Lagos post is outside the Philippines: pills match the map.
+    assert body["total"] == 3
+    assert body["by_status"] == {"posted": 3}
+    assert body["by_type"] == {"plastic": 2, "metal": 1}
+    ncr = body["by_region"]["National Capital Region (NCR)"]
+    assert ncr["total"] == 2
+    assert ncr["by_type"] == {"plastic": 1, "metal": 1}
+    assert ncr["by_status"] == {"posted": 2}
+    visayas = body["by_region"]["Region VII (Central Visayas)"]
+    assert visayas == {"total": 1, "by_status": {"posted": 1}, "by_type": {"plastic": 1}}
+    assert "Region XI (Davao Region)" not in body["by_region"]
+
+
+def test_garbage_summary_region_empty_without_supported_country(
+    client, dispatcher, make_user
+):
+    me = make_user()
+    _make_post(client, me, longitude=120.98, latitude=14.59)
+    plain = client.get(
+        "/api/v1/logistics/garbage/summary", headers=dispatcher["headers"]
+    )
+    assert plain.json()["by_region"] == {}
+    unsupported = client.get(
+        "/api/v1/logistics/garbage/summary?country=Nigeria",
+        headers=dispatcher["headers"],
+    )
+    assert unsupported.json()["by_region"] == {}
+
+
+def test_garbage_summary_scopes_totals_to_country(client, dispatcher, make_user, fake_db):
+    me = make_user()
+    _make_post(client, me, types=["plastic"])
+    ghana = _make_post(client, me, types=["metal"])
+    fake_db["garbage_posts"].docs[ObjectId(ghana["id"])]["country"] = "Ghana"
+
+    plain = client.get(
+        "/api/v1/logistics/garbage/summary", headers=dispatcher["headers"]
+    )
+    assert plain.json()["total"] == 2
+
+    # No Nigerian boundaries shipped: falls back to the stamped country.
+    nigeria = client.get(
+        "/api/v1/logistics/garbage/summary?country=Nigeria",
+        headers=dispatcher["headers"],
+    )
+    assert nigeria.json()["total"] == 1
+    assert nigeria.json()["by_type"] == {"plastic": 1}
+    assert nigeria.json()["by_region"] == {}
+
+    ghana_summary = client.get(
+        "/api/v1/logistics/garbage/summary?country=ghana",
+        headers=dispatcher["headers"],
+    )
+    assert ghana_summary.json()["total"] == 1
+    assert ghana_summary.json()["by_type"] == {"metal": 1}
 
 
 def test_truck_locations_and_filters(client, dispatcher):

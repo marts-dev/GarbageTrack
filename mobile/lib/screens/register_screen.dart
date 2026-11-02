@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/country_viewports.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -17,7 +18,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _name = TextEditingController();
-  final _country = TextEditingController();
+  String? _country;
   String _role = 'resident';
   String? _error;
 
@@ -26,7 +27,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _email.dispose();
     _password.dispose();
     _name.dispose();
-    _country.dispose();
     super.dispose();
   }
 
@@ -37,7 +37,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       await context.read<AuthProvider>().register(
             email: _email.text.trim(),
             password: _password.text,
-            country: _country.text.trim(),
+            country: _country!,
             fullName: _name.text.trim().isEmpty ? null : _name.text.trim(),
             role: _role,
           );
@@ -113,15 +113,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         v != null && v.length >= 8 ? null : 'At least 8 characters',
                   ),
                   const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _country,
-                    textCapitalization: TextCapitalization.words,
+                  DropdownButtonFormField<String>(
+                    initialValue: _country,
                     decoration: const InputDecoration(
                       labelText: 'Country',
                     ),
-                    validator: (v) => v != null && v.trim().isNotEmpty
-                        ? null
-                        : 'Enter your country',
+                    hint: const Text('Select your country'),
+                    items: [
+                      for (final name in supportedCountries)
+                        DropdownMenuItem(value: name, child: Text(name)),
+                    ],
+                    onChanged: (v) => setState(() => _country = v),
+                    validator: (v) =>
+                        v != null ? null : 'Select your country',
                   ),
                   const SizedBox(height: 12),
                   Text('I am a…', style: theme.textTheme.labelLarge),

@@ -26,6 +26,7 @@ from app.schemas.logistics import (
     TruckLocationResponse,
 )
 from app.services import garbage as garbage_service
+from app.services import regions as regions_service
 from app.services import routing as routing_service
 from app.services import trucks as trucks_service
 
@@ -88,18 +89,42 @@ async def list_all_posts(
     return posts
 
 
-async def garbage_summary(db: AsyncDatabase) -> GarbageSummaryResponse:
+async def garbage_summary(
+    db: AsyncDatabase, country: str | None = None
+) -> GarbageSummaryResponse:
+    docs = [doc async for doc in db[garbage_model.COLLECTION].find({})]
+    if country:
+        docs = _posts_in_country(docs, country)
     by_status: dict[str, int] = {}
     by_type: dict[str, int] = {}
-    total = 0
-    async for doc in db[garbage_model.COLLECTION].find({}):
-        total += 1
+    for doc in docs:
         status = str(doc["status"])
         by_status[status] = by_status.get(status, 0) + 1
         for garbage_type in doc.get("types", []):
             name = str(garbage_type)
             by_type[name] = by_type.get(name, 0) + 1
-    return GarbageSummaryResponse(total=total, by_status=by_status, by_type=by_type)
+    by_region = regions_service.aggregate_by_region(docs, country) if country else {}
+    return GarbageSummaryResponse(
+        total=len(docs), by_status=by_status, by_type=by_type, by_region=by_region
+    )
+
+
+def _posts_in_country(posts: list[dict], country: str) -> list[dict]:
+    """Posts belonging to a country.
+
+    Countries with shipped boundaries use geospatial containment so the
+    pills match the choropleth exactly; the rest fall back to the country
+    stamped on the post at creation (case-insensitive).
+    """
+    regions = regions_service.load_regions(country)
+    if regions:
+        return [doc for doc in posts if regions_service.doc_in_country(doc, regions)]
+    wanted = country.strip().lower()
+    return [
+        doc
+        for doc in posts
+        if str(doc.get("country") or "").strip().lower() == wanted
+    ]
 
 
 async def truck_locations(

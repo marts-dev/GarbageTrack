@@ -54,10 +54,17 @@ class TruckLocationResponse(BaseModel):
     operator_id: str | None = None
 
 
+class RegionSummaryResponse(BaseModel):
+    total: int
+    by_status: dict[str, int]
+    by_type: dict[str, int]
+
+
 class GarbageSummaryResponse(BaseModel):
     total: int
     by_status: dict[str, int]
     by_type: dict[str, int]
+    by_region: dict[str, RegionSummaryResponse] = Field(default_factory=dict)
 
 
 class PlannedRouteCreate(BaseModel):

@@ -72,8 +72,8 @@ class User {
   final String role;
   final bool isActive;
 
-  /// Free-text country from registration. Nullable so legacy accounts
-  /// created before the field existed keep parsing.
+  /// Country chosen at registration (dropdown). Nullable so legacy
+  /// accounts created before the field existed keep parsing.
   final String? country;
 
   User({
@@ -449,12 +449,45 @@ class GarbageSummary {
   final Map<String, int> byStatus;
   final Map<String, int> byType;
 
-  GarbageSummary({required this.total, required this.byStatus, required this.byType});
+  /// Per-region breakdown, keyed by region name. Only present when the
+  /// summary was requested with a country that has boundary data.
+  final Map<String, RegionSummary> byRegion;
+
+  GarbageSummary({
+    required this.total,
+    required this.byStatus,
+    required this.byType,
+    this.byRegion = const {},
+  });
 
   factory GarbageSummary.fromJson(Map<String, dynamic> json) => GarbageSummary(
         total: (json['total'] as num).toInt(),
         byStatus: (json['by_status'] as Map).map((k, v) => MapEntry(k as String, (v as num).toInt())),
         byType: (json['by_type'] as Map).map((k, v) => MapEntry(k as String, (v as num).toInt())),
+        byRegion: ((json['by_region'] as Map?) ?? const {}).map(
+          (k, v) => MapEntry(k as String, RegionSummary.fromJson(v as Map<String, dynamic>)),
+        ),
+      );
+}
+
+/// Garbage totals inside one map region.
+class RegionSummary {
+  final int total;
+  final Map<String, int> byStatus;
+  final Map<String, int> byType;
+
+  const RegionSummary({
+    required this.total,
+    this.byStatus = const {},
+    this.byType = const {},
+  });
+
+  factory RegionSummary.fromJson(Map<String, dynamic> json) => RegionSummary(
+        total: (json['total'] as num).toInt(),
+        byStatus: ((json['by_status'] as Map?) ?? const {}).map(
+            (k, v) => MapEntry(k as String, (v as num).toInt())),
+        byType: ((json['by_type'] as Map?) ?? const {}).map(
+            (k, v) => MapEntry(k as String, (v as num).toInt())),
       );
 }
 

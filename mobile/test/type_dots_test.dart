@@ -52,4 +52,38 @@ void main() {
       expect(find.byType(TypeDot), findsNWidgets(2));
     });
   });
+
+  group('TypeCountRows', () {
+    testWidgets('sorts by count and shows share bars', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: TypeCountRows({'paper': 1, 'plastic': 3}),
+          ),
+        ),
+      );
+      // Biggest stream first despite map order.
+      final labels = tester
+          .widgetList<Text>(find.descendant(
+            of: find.byType(TypeCountRows),
+            matching: find.byType(Text),
+          ))
+          .map((t) => t.data)
+          .toList();
+      expect(labels, ['Plastic', '3', 'Paper', '1']);
+      expect(find.byType(TypeDot), findsNWidgets(2));
+      final bars = tester.widgetList<LinearProgressIndicator>(
+          find.byType(LinearProgressIndicator));
+      expect(bars.map((b) => b.value), [0.75, 0.25]);
+    });
+
+    testWidgets('shows a placeholder without data', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: TypeCountRows({})),
+        ),
+      );
+      expect(find.text('No type data yet'), findsOneWidget);
+    });
+  });
 }

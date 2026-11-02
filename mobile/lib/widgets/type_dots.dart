@@ -67,6 +67,88 @@ class TypeDots extends StatelessWidget {
   }
 }
 
+/// Sorted count rows with a share-of-mix bar per garbage type, for the
+/// logistics dashboard and the region drill sheet.
+class TypeCountRows extends StatelessWidget {
+  const TypeCountRows(this.byType, {super.key});
+
+  /// Garbage type -> report count.
+  final Map<String, int> byType;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = byType.entries.toList()
+      ..sort((a, b) {
+        final byCount = b.value.compareTo(a.value);
+        return byCount != 0 ? byCount : a.key.compareTo(b.key);
+      });
+    if (entries.isEmpty) {
+      final scheme = Theme.of(context).colorScheme;
+      return Text(
+        'No type data yet',
+        style: Theme.of(context)
+            .textTheme
+            .bodyMedium
+            ?.copyWith(color: scheme.onSurfaceVariant),
+      );
+    }
+    final total = entries.fold<int>(0, (sum, e) => sum + e.value);
+    return Column(
+      children: [
+        for (var i = 0; i < entries.length; i++) ...[
+          if (i > 0) const SizedBox(height: 10),
+          _TypeCountRow(
+            type: entries[i].key,
+            count: entries[i].value,
+            share: total > 0 ? entries[i].value / total : 0,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _TypeCountRow extends StatelessWidget {
+  const _TypeCountRow({
+    required this.type,
+    required this.count,
+    required this.share,
+  });
+
+  final String type;
+  final int count;
+  final double share;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Row(
+          children: [
+            TypeDot(type, size: 12),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(pretty(type), style: theme.textTheme.bodyMedium),
+            ),
+            Text('$count', style: theme.textTheme.titleMedium),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(3),
+          child: LinearProgressIndicator(
+            value: share,
+            minHeight: 6,
+            color: garbageTypeColor(type, theme.brightness),
+            backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Wrapped dot + label chips for a list of types.
 class TypeChips extends StatelessWidget {
   const TypeChips(this.types, {super.key});

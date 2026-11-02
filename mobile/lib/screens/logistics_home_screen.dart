@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:provider/provider.dart';
 
@@ -9,6 +10,7 @@ import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import '../widgets/type_dots.dart';
 import '../widgets/geo_map.dart';
+import '../widgets/region_map.dart';
 import '../widgets/route_preview.dart';
 import 'facility_form_screen.dart';
 import 'route_create_screen.dart';
@@ -16,10 +18,15 @@ import 'route_detail_screen.dart';
 import 'truck_form_screen.dart';
 
 class LogisticsHomeScreen extends StatelessWidget {
-  const LogisticsHomeScreen({super.key, this.tileProvider});
+  const LogisticsHomeScreen(
+      {super.key, this.tileProvider, this.regionBoundariesLoader});
 
   /// Overrides tile loading (e.g. an offline stub in widget tests).
   final TileProvider? tileProvider;
+
+  /// Loads region boundary GeoJSON for an asset path. Defaults to the
+  /// bundled asset; injectable so widget tests can bypass the asset bundle.
+  final Future<String> Function(String asset)? regionBoundariesLoader;
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +56,10 @@ class LogisticsHomeScreen extends StatelessWidget {
         ),
         body: TabBarView(
           children: [
-            const _OverviewTab(),
+            _OverviewTab(
+              tileProvider: tileProvider,
+              regionBoundariesLoader: regionBoundariesLoader,
+            ),
             _TrucksTab(tileProvider: tileProvider),
             _FacilitiesTab(tileProvider: tileProvider),
             _RoutesTab(tileProvider: tileProvider),
@@ -61,7 +71,9 @@ class LogisticsHomeScreen extends StatelessWidget {
 }
 
 class _OverviewTab extends StatefulWidget {
-  const _OverviewTab();
+  const _OverviewTab({this.tileProvider, this.regionBoundariesLoader});
+  final TileProvider? tileProvider;
+  final Future<String> Function(String asset)? regionBoundariesLoader;
   @override
   State<_OverviewTab> createState() => _OverviewTabState();
 }
@@ -74,7 +86,7 @@ class _OverviewTabState extends State<_OverviewTab> {
     final auth = context.watch<AuthProvider>();
     return FutureBuilder(
       key: ValueKey(_reload),
-      future: auth.logistics.garbageSummary(),
+      future: auth.logistics.garbageSummary(country: auth.country),
       builder: (context, snapshot) => AsyncView<GarbageSummary>(
         snapshot: snapshot,
         onRetry: () => setState(() => _reload++),
@@ -118,6 +130,12 @@ class _OverviewTabState extends State<_OverviewTab> {
                 ),
               ),
               const SizedBox(height: 16),
+              _RegionSection(
+                country: auth.country,
+                summary: summary,
+                tileProvider: widget.tileProvider,
+                regionBoundariesLoader: widget.regionBoundariesLoader,
+              ),
               Text('By status', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
               for (final entry in summary.byStatus.entries)
@@ -137,18 +155,107 @@ class _OverviewTabState extends State<_OverviewTab> {
               const SizedBox(height: 8),
               Text('By type', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final entry in summary.byType.entries)
-                    Chip(label: Text('${pretty(entry.key)} · ${entry.value}')),
-                ],
-              ),
+              TypeCountRows(summary.byType),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Choropleth of report counts per region for countries with shipped
+/// boundaries. Hidden otherwise (pills below still carry the totals).
+/// Tapping a region opens its breakdown sheet.
+class _RegionSection extends StatelessWidget {
+  const _RegionSection({
+    required this.country,
+    required this.summary,
+    this.tileProvider,
+    this.regionBoundariesLoader,
+  });
+
+  final String? country;
+  final GarbageSummary summary;
+  final TileProvider? tileProvider;
+  final Future<String> Function(String asset)? regionBoundariesLoader;
+
+  void _showRegion(BuildContext context, String name) {
+    final detail = summary.byRegion[name] ??
+        const RegionSummary(total: 0);
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(name, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text(
+              '${detail.total} ${detail.total == 1 ? 'report' : 'reports'}',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            if (detail.total > 0) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final entry in detail.byStatus.entries)
+                    StatusPill(
+                      label: '${pretty(entry.key)} · ${entry.value}',
+                      status: entry.key,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TypeCountRows(detail.byType),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = regionBoundariesFor(country);
+    if (asset == null) return const SizedBox.shrink();
+    return FutureBuilder(
+      future:
+          regionBoundariesLoader?.call(asset) ?? rootBundle.loadString(asset),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox(
+            height: 120,
+            child: LoadingView(label: 'Loading regions…'),
+          );
+        }
+        // A missing/unreadable asset must never break the dashboard.
+        if (!snapshot.hasData) return const SizedBox.shrink();
+        final regions = parseRegionBoundaries(snapshot.data!);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('By region',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            RegionChoropleth(
+              regions: regions,
+              counts: {
+                for (final entry in summary.byRegion.entries)
+                  entry.key: entry.value.total,
+              },
+              onRegionTap: (name) => _showRegion(context, name),
+              tileProvider: tileProvider,
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
+      },
     );
   }
 }
