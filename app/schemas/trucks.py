@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.models.garbage import GarbageStatus, GarbageType
 from app.models.geo import GeoLineString, GeoPoint
 from app.models.truck import TruckAvailability, TruckStatus
+from app.schemas.logistics import FacilityResponse, PlannedRouteResponse
 
 
 class TruckLocation(BaseModel):
@@ -68,10 +69,21 @@ class CollectionRouteResponse(BaseModel):
     geometry_source: str = "straight"
 
 
+class TruckPlannedRouteResponse(PlannedRouteResponse):
+    """A truck's assigned plan for operations roles.
+
+    Embeds the depot facilities so collectors — who cannot list facilities —
+    still see where the route ends. Stops whose posts were collected since
+    planning are already filtered out.
+    """
+
+    depots: list[FacilityResponse] = Field(default_factory=list)
+
+
 class CollectVicinityRequest(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     latitude: float | None = Field(default=None, ge=-90, le=90)
-    radius_meters: float = Field(default=500, gt=0)
+    radius_meters: float = Field(default=30, gt=0)
     types: list[GarbageType] | None = None
 
 

@@ -52,9 +52,24 @@ COLLECTIONS = [
     route_model.COLLECTION,
 ]
 
+# Demo neighborhood center. Move these two constants to relocate every
+# seeded point (posts, trucks, facilities, route) while keeping the
+# relative layout intact.
+CENTER_LON = 121.0629
+CENTER_LAT = 14.6989
+
+# Anchor the original layout was drawn from (Commonwealth, Quezon City).
+_ANCHOR_LON = 121.0300
+_ANCHOR_LAT = 14.6500
+
 
 def pt(lon: float, lat: float) -> GeoPoint:
-    return GeoPoint(coordinates=(lon, lat))
+    return GeoPoint(
+        coordinates=(
+            lon + (CENTER_LON - _ANCHOR_LON),
+            lat + (CENTER_LAT - _ANCHOR_LAT),
+        )
+    )
 
 
 async def seed() -> dict:
@@ -110,7 +125,7 @@ async def seed() -> dict:
         post_ids = [ObjectId() for _ in range(9)]
         specs = [
             # (lon, lat, types, description, status, days_ago, image?, district)
-            # Quezon City, Metro Manila.
+            # Anchor-relative layout; pt() shifts everything to CENTER_*.
             (121.0310, 14.6510, [GarbageType.PLASTIC, GarbageType.METAL], "Bags by the gate",
              GarbageStatus.POSTED, 0, False, "Commonwealth"),
             (121.0320, 14.6520, [GarbageType.ORGANIC], "Food waste bins overflowing",

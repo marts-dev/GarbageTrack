@@ -113,8 +113,11 @@ Collector API:
 - `GET /api/v1/trucks/{truck_id}/route` — nearest-first collection route
   (`$geoNear`) filtered by the truck's garbage types (narrowable via `types`)
   and limited to remaining capacity; stops include per-stop distances
+- `GET /api/v1/trucks/{truck_id}/planned-route` — the truck's assigned
+  planned route for the collector to follow (404 when none assigned);
+  stops already collected are filtered out and depots are embedded
 - `POST /api/v1/trucks/{truck_id}/collect-vicinity` — mark posted/scheduled
-  garbage within `radius_meters` (default 500) as collected; bumps the
+  garbage within `radius_meters` (default 30) as collected; bumps the
   truck's load and auto-marks it `full` at capacity (403 unless the truck is
   assigned to you; logistics/admin bypass)
 - `PATCH /api/v1/trucks/{truck_id}/availability` — set `available`, `working`,

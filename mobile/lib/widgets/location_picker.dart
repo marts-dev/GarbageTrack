@@ -23,6 +23,9 @@ class LocationMapPicker extends StatefulWidget {
   });
 
   final ValueChanged<GeoPoint?> onChanged;
+
+  /// Starting pick, followed live when the parent changes it (e.g. a GPS
+  /// prefill landing after first build, or a clear back to null).
   final GeoPoint? initial;
   final double height;
 
@@ -49,6 +52,17 @@ class _LocationMapPickerState extends State<LocationMapPicker> {
     super.initState();
     _controller = MapController();
     _picked = widget.initial;
+  }
+
+  @override
+  void didUpdateWidget(covariant LocationMapPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Follow the parent's pick (GPS prefill, clear); taps already agree.
+    if (widget.initial != oldWidget.initial && widget.initial != _picked) {
+      _picked = widget.initial;
+      final picked = _picked;
+      if (picked != null) _controller.move(picked.latLng, 15);
+    }
   }
 
   @override

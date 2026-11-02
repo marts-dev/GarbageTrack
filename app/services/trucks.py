@@ -4,6 +4,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.asynchronous.database import AsyncDatabase
 
+from app.models import facility as facility_model
 from app.models import garbage as garbage_model
 from app.models import route as route_model
 from app.models import truck as truck_model
@@ -11,13 +12,16 @@ from app.models.auth import Role
 from app.models.common import utcnow
 from app.models.garbage import GarbageStatus
 from app.models.geo import GeoLineString, GeoPoint, geo_point
+from app.models.route import PlannedRouteStatus
 from app.models.truck import TruckAvailability, TruckStatus
+from app.schemas.logistics import FacilityResponse, PlannedStopResponse
 from app.schemas.trucks import (
     CollectionRouteResponse,
     CollectVicinityRequest,
     CollectVicinityResponse,
     RouteStop,
     TruckLocation,
+    TruckPlannedRouteResponse,
     TruckResponse,
     TruckScheduleCreate,
     TruckUpdate,
@@ -54,6 +58,10 @@ class TruckOperatorInvalidError(Exception):
 
 
 class TruckHasRoutesError(Exception):
+    pass
+
+
+class NoPlannedRouteError(Exception):
     pass
 
 
@@ -305,6 +313,94 @@ async def get_collection_route(
         stops=stops,
         geometry=geometry,
         geometry_source=geometry_source,
+    )
+
+
+async def get_truck_planned_route(db: AsyncDatabase, truck_id: str) -> TruckPlannedRouteResponse:
+    """The truck's active assigned plan, most recent first.
+
+    Raises [TruckNotFoundError] for an unknown truck and [NoPlannedRouteError]
+    when the truck has no assigned/in-progress plan. Stops whose posts were
+    collected since planning are filtered out so the collector only follows
+    remaining work; depots are embedded in route order.
+    """
+    truck_doc = await _get_truck_doc(db, truck_id)
+    candidates = [
+        doc
+        async for doc in db[route_model.COLLECTION].find(
+            {
+                "truck_id": truck_doc["_id"],
+                "status": {
+                    "$in": [
+                        PlannedRouteStatus.ASSIGNED.value,
+                        PlannedRouteStatus.IN_PROGRESS.value,
+                    ]
+                },
+            }
+        )
+    ]
+    if not candidates:
+        raise NoPlannedRouteError(truck_id)
+    doc = max(candidates, key=lambda d: d.get("created_at"))
+    stop_post_ids = [stop["post_id"] for stop in doc.get("stops", [])]
+    collected: set = set()
+    if stop_post_ids:
+        collected = {
+            collection_doc["_id"]
+            async for collection_doc in db[garbage_model.COLLECTION].find(
+                {
+                    "_id": {"$in": stop_post_ids},
+                    "status": GarbageStatus.COLLECTED.value,
+                }
+            )
+        }
+    stops = [
+        PlannedStopResponse(
+            post_id=str(stop["post_id"]),
+            location=stop["location"],
+            types=stop["types"],
+            distance_meters=stop.get("distance_meters"),
+        )
+        for stop in doc.get("stops", [])
+        if stop["post_id"] not in collected
+    ]
+    depot_ids = doc.get("depot_ids", [])
+    depots_by_id = (
+        {
+            depot_doc["_id"]: depot_doc
+            async for depot_doc in db[facility_model.COLLECTION].find(
+                {"_id": {"$in": depot_ids}}
+            )
+        }
+        if depot_ids
+        else {}
+    )
+    return TruckPlannedRouteResponse(
+        id=str(doc["_id"]),
+        truck_id=str(doc["truck_id"]),
+        name=doc.get("name"),
+        origin=doc["origin"],
+        stops=stops,
+        status=doc["status"],
+        created_at=doc["created_at"],
+        depot_ids=[str(depot_id) for depot_id in depot_ids],
+        depots=[
+            FacilityResponse(
+                id=str(depot_ids[i]),
+                name=depots_by_id[depot_ids[i]]["name"],
+                kind=depots_by_id[depot_ids[i]]["kind"],
+                location=depots_by_id[depot_ids[i]]["location"],
+                accepted_types=depots_by_id[depot_ids[i]]["accepted_types"],
+                address=depots_by_id[depot_ids[i]].get("address"),
+                created_at=depots_by_id[depot_ids[i]]["created_at"],
+                updated_at=depots_by_id[depot_ids[i]]["updated_at"],
+            )
+            for i in range(len(depot_ids))
+            if depot_ids[i] in depots_by_id
+        ],
+        collection_points=doc.get("collection_points", []),
+        geometry=doc.get("geometry"),
+        geometry_source=doc.get("geometry_source", "straight"),
     )
 
 

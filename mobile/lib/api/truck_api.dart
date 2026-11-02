@@ -48,6 +48,18 @@ class TruckApi {
     return Truck.fromJson(body as Map<String, dynamic>);
   }
 
+  /// The truck's assigned planned route, or null when logistics has not
+  /// assigned one (404). Stops already collected are filtered server-side.
+  Future<PlannedRoute?> getPlannedRoute(String truckId) async {
+    try {
+      final body = await _client.get('/trucks/$truckId/planned-route');
+      return PlannedRoute.fromJson(body as Map<String, dynamic>);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
   Future<CollectionRoute> getRoute(
     String truckId, {
     double? longitude,
@@ -73,7 +85,7 @@ class TruckApi {
     String truckId, {
     double? longitude,
     double? latitude,
-    double radiusMeters = 500,
+    double radiusMeters = 30,
     List<String>? types,
   }) async {
     final body = await _client.postJson('/trucks/$truckId/collect-vicinity', body: {

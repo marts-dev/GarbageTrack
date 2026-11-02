@@ -13,6 +13,7 @@ from app.schemas.trucks import (
     CollectVicinityRequest,
     CollectVicinityResponse,
     TruckLocation,
+    TruckPlannedRouteResponse,
     TruckResponse,
     TruckScheduleCreate,
     TruckUpdate,
@@ -20,6 +21,7 @@ from app.schemas.trucks import (
 from app.services import trucks as trucks_service
 from app.services.trucks import (
     EmptyUpdateError,
+    NoPlannedRouteError,
     TruckHasRoutesError,
     TruckLocationUnknownError,
     TruckNotAssignedError,
@@ -131,6 +133,19 @@ async def read_collection_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
     except TruckLocationUnknownError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
+@router.get("/{truck_id}/planned-route", response_model=TruckPlannedRouteResponse)
+async def read_truck_planned_route(truck_id: str, user: Collector, db: Db):
+    _ = user
+    try:
+        return await trucks_service.get_truck_planned_route(db, truck_id)
+    except TruckNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
+    except NoPlannedRouteError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="no planned route for this truck"
+        ) from None
 
 
 @router.post("/{truck_id}/collect-vicinity", response_model=CollectVicinityResponse)

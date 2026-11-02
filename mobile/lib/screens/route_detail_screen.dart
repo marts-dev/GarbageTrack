@@ -105,31 +105,13 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
               }
               final data = snapshot.data ?? const _RouteMapData(depots: []);
               final depots = data.depots;
-              final live = data.truck?.currentLocation;
               final scheme = Theme.of(context).colorScheme;
-              return GarbageMapView(
+              return RouteMapView(
                 height: 320,
                 tileProvider: widget.tileProvider,
-                markers: [
-                  // Distinct origin pin: the truck icon is reserved for the
-                  // collector's live position along the route.
-                  MapMarkerData(
-                    point: route.origin,
-                    icon: Icons.trip_origin,
-                    color: scheme.primary,
-                    label: 'Origin',
-                  ),
-                  // The collector's live position. Skipped while unknown
-                  // or coinciding with the origin pin.
-                  if (live != null &&
-                      (live.longitude != route.origin.longitude ||
-                          live.latitude != route.origin.latitude))
-                    MapMarkerData(
-                      point: live,
-                      icon: Icons.local_shipping,
-                      color: Colors.blue,
-                      label: 'Current location',
-                    ),
+                origin: route.origin,
+                live: data.truck?.currentLocation,
+                stopMarkers: [
                   for (final stop in route.stops)
                     MapMarkerData(
                       point: stop.location,
@@ -139,6 +121,8 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                               stop.types.first, scheme.brightness),
                       label: 'Stop: ${stop.types.map(pretty).join(', ')}',
                     ),
+                ],
+                extraMarkers: [
                   for (final point in route.collectionPoints)
                     MapMarkerData(
                       point: point,
@@ -154,7 +138,7 @@ class _RouteDetailScreenState extends State<RouteDetailScreen> {
                       label: 'Depot: ${depot.name}',
                     ),
                 ],
-                polylines: [route.displayLine],
+                displayLine: route.displayLine,
               );
             },
           ),

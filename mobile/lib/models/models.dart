@@ -384,6 +384,11 @@ class PlannedRoute {
   /// Facility ids used as depots for this route (all facility kinds).
   final List<String> depotIds;
 
+  /// Embedded depot facilities, in route order. Present on the truck
+  /// planned-route response so collectors see the route end without a
+  /// facility listing; empty on the logistics list/detail responses.
+  final List<Facility> depots;
+
   /// Logistics-placed collection points, tapped on the map at creation.
   final List<GeoPoint> collectionPoints;
 
@@ -402,6 +407,7 @@ class PlannedRoute {
     required this.status,
     this.name,
     this.depotIds = const [],
+    this.depots = const [],
     this.collectionPoints = const [],
     this.geometry,
     this.geometrySource = 'straight',
@@ -418,6 +424,10 @@ class PlannedRoute {
         status: json['status'] as String,
         depotIds: (json['depot_ids'] as List?)
                 ?.map((e) => e as String)
+                .toList() ??
+            const [],
+        depots: (json['depots'] as List?)
+                ?.map((e) => Facility.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
         collectionPoints: (json['collection_points'] as List?)

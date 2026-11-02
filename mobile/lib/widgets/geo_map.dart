@@ -384,6 +384,66 @@ class _GarbageMapViewState extends State<GarbageMapView> {
   }
 }
 
+/// Assigned-route overlay shared by the collector and logistics route
+/// views: the distinct origin pin, the live truck position, stop pins, and
+/// extra pins (collection points, depots) over the route polyline.
+class RouteMapView extends StatelessWidget {
+  const RouteMapView({
+    super.key,
+    required this.origin,
+    this.live,
+    this.stopMarkers = const [],
+    this.extraMarkers = const [],
+    required this.displayLine,
+    this.height = 220,
+    this.tileProvider,
+  });
+
+  /// Fixed route start. Always rendered with the distinct origin pin.
+  final GeoPoint origin;
+
+  /// Collector's live position. Skipped while unknown or coinciding with
+  /// the origin pin.
+  final GeoPoint? live;
+
+  final List<MapMarkerData> stopMarkers;
+  final List<MapMarkerData> extraMarkers;
+  final List<GeoPoint> displayLine;
+  final double height;
+  final TileProvider? tileProvider;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final live = this.live;
+    final showLive = live != null &&
+        (live.longitude != origin.longitude ||
+            live.latitude != origin.latitude);
+    return GarbageMapView(
+      height: height,
+      tileProvider: tileProvider,
+      markers: [
+        MapMarkerData(
+          point: origin,
+          icon: Icons.trip_origin,
+          color: scheme.primary,
+          label: 'Origin',
+        ),
+        if (showLive)
+          MapMarkerData(
+            point: live,
+            icon: Icons.local_shipping,
+            color: Colors.blue,
+            label: 'Current location',
+          ),
+        ...stopMarkers,
+        ...extraMarkers,
+      ],
+      polylines: [displayLine],
+    );
+  }
+}
+
 /// Gesture wrapper that stays out of the tree when [onTap] is null.
 class _Tappable extends StatelessWidget {
   const _Tappable({required this.child, this.onTap});

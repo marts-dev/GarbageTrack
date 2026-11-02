@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
+import '../api/api_client.dart';
 import '../models/models.dart';
 import '../state/auth_provider.dart';
 import '../utils/country_viewports.dart';
@@ -273,6 +274,7 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                     _CollectTab(
                       truck: truck,
                       tileProvider: widget.tileProvider,
+                      positionProvider: widget.positionProvider,
                       // Collectors act only on their assigned truck; the API
                       // bypasses the binding check for logistics/admins.
                       assignedGuarded: auth.user?.role == 'collector' &&
@@ -339,8 +341,8 @@ class _RouteTab extends StatefulWidget {
   final TileProvider? tileProvider;
 
   /// Bumped by the parent when the route must refetch (collect,
-  /// availability). Location pings deliberately leave it alone so the
-  /// loaded route keeps its origin.
+  /// availability) so collected stops drop out. Location pings
+  /// deliberately leave it alone so the loaded route is never disturbed.
   final int extraReload;
 
   @override
@@ -348,14 +350,11 @@ class _RouteTab extends StatefulWidget {
 }
 
 class _RouteTabState extends State<_RouteTab> {
-  final _types = <String>{};
-
   /// Hoisted route future: creating it in [build] would resubscribe the
   /// [FutureBuilder] on every parent rebuild (e.g. a location ping
-  /// refreshing the header), re-anchoring the route to the new origin.
-  /// It is replaced only for a new truck, a filter change, an explicit
-  /// parent reload signal, or retry.
-  late Future<CollectionRoute> _routeFuture;
+  /// refreshing the header). It is replaced only for a new truck, an
+  /// explicit parent reload signal, or retry.
+  late Future<PlannedRoute?> _routeFuture;
 
   @override
   void initState() {
@@ -372,118 +371,167 @@ class _RouteTabState extends State<_RouteTab> {
     }
   }
 
-  Future<CollectionRoute> _loadRoute() =>
-      context.read<AuthProvider>().trucks.getRoute(
-            widget.truck.id,
-            types: _types.isEmpty ? null : _types.toList(),
-          );
+  /// The truck's assigned plan. Null (no plan yet) is a valid outcome, so
+  /// the builder below handles states manually instead of [AsyncView],
+  /// which treats null data as missing.
+  Future<PlannedRoute?> _loadRoute() =>
+      context.read<AuthProvider>().trucks.getPlannedRoute(widget.truck.id);
+
+  RouteMapView _routeMap(BuildContext context, PlannedRoute route) {
+    final scheme = Theme.of(context).colorScheme;
+    return RouteMapView(
+      tileProvider: widget.tileProvider,
+      origin: route.origin,
+      live: widget.truck.currentLocation,
+      stopMarkers: [
+        for (final stop in route.stops)
+          MapMarkerData(
+            point: stop.location,
+            color: stop.types.isEmpty
+                ? null
+                : garbageTypeColor(stop.types.first, scheme.brightness),
+            label: 'Stop: ${stop.types.map(pretty).join(', ')}',
+          ),
+      ],
+      extraMarkers: [
+        for (final point in route.collectionPoints)
+          MapMarkerData(
+            point: point,
+            icon: Icons.flag,
+            color: scheme.tertiary,
+            label: 'Collection point',
+          ),
+        for (final depot in route.depots)
+          MapMarkerData(
+            point: depot.location,
+            icon: Icons.home_work,
+            color: scheme.secondary,
+            label: 'Depot: ${depot.name}',
+          ),
+      ],
+      displayLine: route.displayLine,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: GarbageTypePicker(
-            selected: _types,
-            onChanged: (next) => setState(() {
-              _types
-                ..clear()
-                ..addAll(next);
-              _routeFuture = _loadRoute();
-            }),
-          ),
-        ),
-        Expanded(
-          child: FutureBuilder(
-            future: _routeFuture,
-            builder: (context, snapshot) => AsyncView<CollectionRoute>(
-              snapshot: snapshot,
-              onRetry: () => setState(() => _routeFuture = _loadRoute()),
-              builder: (context, route) {
-                if (route.stops.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.route_outlined,
-                    title: 'No stops on this route.',
-                    subtitle: 'Try clearing the type filter.',
-                  );
-                }
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: route.stops.length + 2,
-                  itemBuilder: (context, i) {
-                    if (i == 0) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
+    return FutureBuilder(
+      future: _routeFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const LoadingView();
+        }
+        if (snapshot.hasError) {
+          final error = snapshot.error;
+          return ErrorView(
+            message:
+                error is ApiException ? error.message : error.toString(),
+            onRetry: () => setState(() => _routeFuture = _loadRoute()),
+          );
+        }
+        final route = snapshot.data;
+        if (route == null) {
+          return const EmptyState(
+            icon: Icons.route_outlined,
+            title: 'No route assigned.',
+            subtitle: 'Ask logistics to assign one.',
+          );
+        }
+        if (route.stops.isEmpty) {
+          // The map still renders (origin + live truck position) so the
+          // collector sees where the route starts; only the stop list is
+          // replaced by the empty notice.
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _AssignedRouteHeader(route: route),
+              const SizedBox(height: 8),
+              _routeMap(context, route),
+              const SizedBox(height: 8),
+              const EmptyState(
+                icon: Icons.route_outlined,
+                title: 'No stops on this route.',
+                subtitle: 'All assigned stops are collected.',
+              ),
+            ],
+          );
+        }
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _AssignedRouteHeader(route: route),
+            const SizedBox(height: 8),
+            _routeMap(context, route),
+            const SizedBox(height: 8),
+            for (var i = 0; i < route.stops.length; i++)
+              Card(
+                child: ListTile(
+                  leading: CircleAvatar(child: Text('${i + 1}')),
+                  title: Row(
+                    children: [
+                      Expanded(
                         child: Text(
-                          '${route.stops.length} stops'
-                          '${route.remainingCapacity != null ? ' · ${route.remainingCapacity} capacity left' : ''}',
-                          style: Theme.of(context).textTheme.labelLarge,
-                        ),
-                      );
-                    }
-                    if (i == 1) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: GarbageMapView(
-                          tileProvider: widget.tileProvider,
-                          markers: [
-                            // Distinct origin pin: the truck icon is reserved
-                            // for the collector's live position below.
-                            MapMarkerData(
-                              point: route.origin,
-                              icon: Icons.trip_origin,
-                              label: 'Origin',
-                            ),
-                            // The collector's live position along the route.
-                            // It rides along with the header truck, never
-                            // re-anchoring the loaded route; skipped while it
-                            // coincides with the origin pin.
-                            if (widget.truck.currentLocation != null &&
-                                (widget.truck.currentLocation!.longitude !=
-                                        route.origin.longitude ||
-                                    widget.truck.currentLocation!.latitude !=
-                                        route.origin.latitude))
-                              MapMarkerData(
-                                point: widget.truck.currentLocation!,
-                                icon: Icons.local_shipping,
-                                color: Colors.blue,
-                                label: 'Current location',
-                              ),
-                            for (final stop in route.stops)
-                              MapMarkerData(
-                                point: stop.location,
-                                label: stop.types.map(pretty).join(', '),
-                              ),
-                          ],
-                          // Road geometry when the API provided it, else
-                          // straight origin -> stops lines.
-                          polylines: [route.displayLine],
-                        ),
-                      );
-                    }
-                    final stop = route.stops[i - 2];
-                    return Card(
-                      child: ListTile(
-                        leading: CircleAvatar(child: Text('${i - 1}')),
-                        title: Row(
-                          children: [
-                            Expanded(
-                                child: Text(stop.types.map(pretty).join(', '))),
-                            TypeDots(stop.types),
-                          ],
-                        ),
-                        subtitle: Text(
-                          '${stop.location.short}'
-                          '${stop.distanceMeters != null ? ' · ${stop.distanceMeters!.round()} m' : ''}',
-                        ),
+                            route.stops[i].types.map(pretty).join(', ')),
                       ),
-                    );
-                  },
-                );
-              },
+                      TypeDots(route.stops[i].types),
+                    ],
+                  ),
+                  subtitle: Text(
+                    '${route.stops[i].location.short}'
+                    '${route.stops[i].distanceMeters != null ? ' · ${route.stops[i].distanceMeters!.round()} m' : ''}',
+                  ),
+                ),
+              ),
+            if (route.depots.isNotEmpty)
+              Card(
+                child: ListTile(
+                  leading: const CardIcon(icon: Icons.home_work),
+                  title: Text('Ends at ${route.depots.first.name}'),
+                  subtitle: route.depots.length > 1
+                      ? Text(route.depots
+                          .skip(1)
+                          .map((depot) => depot.name)
+                          .join(', '))
+                      : null,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Assigned-plan header: route name, status, and counts.
+class _AssignedRouteHeader extends StatelessWidget {
+  const _AssignedRouteHeader({required this.route});
+
+  final PlannedRoute route;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                route.name ?? 'Assigned route',
+                style: theme.textTheme.titleMedium,
+              ),
             ),
-          ),
+            StatusPill(
+              label: pretty(route.status),
+              status: route.status,
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${route.stops.length} stops · ${route.depotIds.length} depot(s)',
+          style: theme.textTheme.bodySmall,
         ),
       ],
     );
@@ -495,7 +543,8 @@ class _CollectTab extends StatefulWidget {
       {required this.truck,
       required this.assignedGuarded,
       required this.onChanged,
-      this.tileProvider});
+      this.tileProvider,
+      this.positionProvider});
   final Truck truck;
 
   /// True when a collector is not this truck's operator, so collecting is
@@ -504,15 +553,41 @@ class _CollectTab extends StatefulWidget {
   final VoidCallback onChanged;
   final TileProvider? tileProvider;
 
+  /// Overrides GPS lookup for the position prefill (e.g. a fixed position
+  /// in widget tests).
+  final Future<Position> Function()? positionProvider;
+
   @override
   State<_CollectTab> createState() => _CollectTabState();
 }
 
 class _CollectTabState extends State<_CollectTab> {
-  final _radius = TextEditingController(text: '500');
+  final _radius = TextEditingController(text: '30');
   GeoPoint? _point;
   bool _busy = false;
   CollectResult? _result;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefillGps();
+  }
+
+  /// Starts the position at the collector's live fix, which is fresher than
+  /// the truck's last ping. Never overwrites a manual pick; on denial or
+  /// failure the field stays empty and the collect falls back to the truck
+  /// location.
+  Future<void> _prefillGps() async {
+    try {
+      final locate = widget.positionProvider ?? requestCurrentPosition;
+      final position = await locate();
+      if (!mounted || _point != null) return;
+      setState(() => _point = GeoPoint(
+          longitude: position.longitude, latitude: position.latitude));
+    } catch (_) {
+      // Empty position: the collect uses the truck location.
+    }
+  }
 
   @override
   void dispose() {
@@ -568,15 +643,27 @@ class _CollectTabState extends State<_CollectTab> {
           const SizedBox(height: 12),
         ],
         Text(
-          'Marks posted garbage near a point as collected. Leave the position empty to use the truck location.',
+          'Marks posted garbage near a point as collected. Starts at your current location; clear it to use the truck location instead.',
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 12),
-        Text('Position (optional)',
-            style: Theme.of(context).textTheme.titleMedium),
+        Row(
+          children: [
+            Expanded(
+              child: Text('Position',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ),
+            if (_point != null)
+              TextButton(
+                onPressed: () => setState(() => _point = null),
+                child: const Text('Use truck location'),
+              ),
+          ],
+        ),
         const SizedBox(height: 8),
         LocationMapPicker(
           onChanged: (point) => setState(() => _point = point),
+          initial: _point,
           fallbackCenter: viewport.center,
           fallbackZoom: viewport.zoom,
           tileProvider: widget.tileProvider,

@@ -122,6 +122,58 @@ Map<String, dynamic> _collectionRouteJson({
       'geometry_source': geometrySource,
     };
 
+/// Assigned-plan payload for `GET /trucks/t1/planned-route`, with one stop
+/// and one embedded depot unless [emptyStops] drops the stop list.
+Map<String, dynamic> _plannedTruckRouteJson({
+  List<List<double>>? geometry,
+  bool emptyStops = false,
+}) =>
+    {
+      'id': 'r1',
+      'truck_id': 't1',
+      'name': 'Morning run',
+      'origin': {
+        'type': 'Point',
+        'coordinates': [3.37, 6.45]
+      },
+      'stops': [
+        if (!emptyStops)
+          {
+            'post_id': 'p1',
+            'location': {
+              'type': 'Point',
+              'coordinates': [3.38, 6.46]
+            },
+            'types': ['plastic'],
+            'distance_meters': 100.0,
+          },
+      ],
+      'status': 'assigned',
+      'created_at': '2026-10-29T00:00:00Z',
+      'depot_ids': ['f1'],
+      'depots': [
+        {
+          'id': 'f1',
+          'name': 'North Depot',
+          'kind': 'dump_site',
+          'location': {
+            'type': 'Point',
+            'coordinates': [3.20, 6.30]
+          },
+          'accepted_types': ['plastic'],
+          'address': null,
+        }
+      ],
+      'collection_points': [],
+      'geometry': geometry == null
+          ? null
+          : {
+              'type': 'LineString',
+              'coordinates': geometry,
+            },
+      'geometry_source': geometry == null ? 'straight' : 'road',
+    };
+
 /// Scrolls the screen's [ListView] until [finder] matches, then reveals it.
 /// Drags along the screen edge so map gestures never swallow the scroll.
 Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
@@ -540,8 +592,9 @@ void main() {
               200,
             );
           }
-          if (request.method == 'GET' && path == '/api/v1/trucks/t1/route') {
-            return http.Response(jsonEncode(_collectionRouteJson()), 200);
+          if (request.method == 'GET' &&
+              path == '/api/v1/trucks/t1/planned-route') {
+            return http.Response(jsonEncode(_plannedTruckRouteJson()), 200);
           }
           if (request.method == 'POST' &&
               path == '/api/v1/trucks/t1/collect-vicinity') {
@@ -654,7 +707,9 @@ void main() {
       int availabilityStatus = 200,
       List<double>? truckLocation,
       List<double>? sharedLocation,
-      bool routeEmptiesOnRefetch = false,
+      bool plannedEmptiesOnRefetch = false,
+      bool plannedEmptyStops = false,
+      bool noPlannedRoute = false,
     }) {
       var routeCalls = 0;
       var shared = false;
@@ -670,12 +725,20 @@ void main() {
               200,
             );
           }
-          if (request.method == 'GET' && path == '/api/v1/trucks/t1/route') {
+          if (request.method == 'GET' &&
+              path == '/api/v1/trucks/t1/planned-route') {
           routeCalls++;
+          if (noPlannedRoute) {
+            return http.Response(
+              jsonEncode({'detail': 'no planned route for this truck'}),
+              404,
+            );
+          }
           return http.Response(
-              jsonEncode(_collectionRouteJson(
+              jsonEncode(_plannedTruckRouteJson(
                 geometry: geometry,
-                emptyStops: routeEmptiesOnRefetch && routeCalls > 1,
+                emptyStops:
+                    plannedEmptyStops || (plannedEmptiesOnRefetch && routeCalls > 1),
               )),
               200);
           }
@@ -713,7 +776,9 @@ void main() {
       int availabilityStatus = 200,
       List<double>? truckLocation,
       List<double>? sharedLocation,
-      bool routeEmptiesOnRefetch = false,
+      bool plannedEmptiesOnRefetch = false,
+      bool plannedEmptyStops = false,
+      bool noPlannedRoute = false,
     }) =>
         AuthProvider.withUser(
           _user('collector'),
@@ -726,7 +791,9 @@ void main() {
               availabilityStatus: availabilityStatus,
               truckLocation: truckLocation,
               sharedLocation: sharedLocation,
-              routeEmptiesOnRefetch: routeEmptiesOnRefetch,
+              plannedEmptiesOnRefetch: plannedEmptiesOnRefetch,
+              plannedEmptyStops: plannedEmptyStops,
+              noPlannedRoute: noPlannedRoute,
             ),
           ),
         );
@@ -826,9 +893,9 @@ void main() {
           calls,
           truckLocation: [3.37, 6.45],
           sharedLocation: [9.9, 9.9],
-          // The new origin has no posts nearby: any route refetch after
-          // the ping would wipe the map, reproducing the reported bug.
-          routeEmptiesOnRefetch: true,
+          // Any route refetch after the ping would come back with no
+          // stops, reproducing the reported bug.
+          plannedEmptiesOnRefetch: true,
         ),
         positionProvider: () async => gps,
       );
@@ -837,7 +904,7 @@ void main() {
       // Route loaded; the live marker is skipped while it coincides
       // with the origin.
       expect(find.textContaining('1 stops'), findsOneWidget);
-      expect(markers(), hasLength(2));
+      expect(markers(), hasLength(3));
 
       await tester.tap(find.text('Share my location'));
       await tester.pumpAndSettle();
@@ -849,7 +916,7 @@ void main() {
       expect(find.textContaining('1 stops'), findsOneWidget);
       expect(find.text('No stops on this route.'), findsNothing);
       expect(
-        calls.where((c) => c == 'GET /api/v1/trucks/t1/route'),
+        calls.where((c) => c == 'GET /api/v1/trucks/t1/planned-route'),
         hasLength(1),
       );
       expect(
@@ -859,7 +926,7 @@ void main() {
       expect(calls, contains('POST /api/v1/trucks/t1/location'));
       // ...and the ping shows as its own marker next to the origin pin.
       final after = markers();
-      expect(after, hasLength(3));
+      expect(after, hasLength(4));
       expect(after.any((m) => m.label == 'Origin'), isTrue);
       expect(
         after.any((m) =>
@@ -903,6 +970,73 @@ void main() {
       expect(collect.onPressed, isNotNull);
     });
 
+    testWidgets('collect radius defaults to 30 meters', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.byType(TextField));
+      final field = tester.widget<TextField>(find.byType(TextField));
+      expect(field.controller?.text, '30');
+    });
+
+    testWidgets('collect tab prefills the collector GPS position',
+        (tester) async {
+      Position gps() => Position(
+            longitude: 9.9,
+            latitude: 9.9,
+            timestamp: DateTime.fromMillisecondsSinceEpoch(0),
+            accuracy: 5,
+            altitude: 0,
+            altitudeAccuracy: 0,
+            heading: 0,
+            headingAccuracy: 0,
+            speed: 0,
+            speedAccuracy: 0,
+          );
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls),
+        positionProvider: () async => gps(),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      // The clear action sits above the map; assert before scrolling down.
+      expect(find.text('Use truck location'), findsOneWidget);
+      await _scrollTo(tester, find.text('Picked: 9.9000, 9.9000'));
+      expect(find.text('Picked: 9.9000, 9.9000'), findsOneWidget);
+
+      // Clearing falls back to the truck location.
+      await _scrollTo(tester, find.text('Use truck location'));
+      await tester.tap(find.text('Use truck location'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Tap the map to pick a location, or use GPS.'),
+        findsOneWidget,
+      );
+      expect(find.text('Use truck location'), findsNothing);
+    });
+
+    testWidgets('collect tab keeps truck fallback when GPS fails',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls),
+        positionProvider: () async => throw StateError('denied'),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(
+          tester, find.text('Tap the map to pick a location, or use GPS.'));
+      expect(
+        find.text('Tap the map to pick a location, or use GPS.'),
+        findsOneWidget,
+      );
+      expect(find.text('Use truck location'), findsNothing);
+    });
+
     testWidgets('availability 403 surfaces the server detail', (tester) async {
       final calls = <String>[];
       await pumpDetail(
@@ -940,6 +1074,62 @@ void main() {
       expect(layer.polylines, hasLength(1));
       // Origin + one stop.
       expect(layer.polylines.single.points, hasLength(2));
+    });
+
+    testWidgets('empty route still shows the map with the origin',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth(
+          {'t1': 'u1'},
+          calls,
+          truckLocation: [3.37, 6.45],
+          plannedEmptyStops: true,
+        ),
+      );
+      expect(find.byType(GarbageMapView), findsOneWidget);
+      final markers =
+          tester.widget<GarbageMapView>(find.byType(GarbageMapView)).markers;
+      // Origin + depot pins render; the live pin is skipped while it
+      // coincides with the origin.
+      expect(
+        markers.map((m) => m.label),
+        containsAll(['Origin', 'Depot: North Depot']),
+      );
+      expect(
+        markers.firstWhere((m) => m.label == 'Origin').icon,
+        Icons.trip_origin,
+      );
+      // The empty notice sits below the map; scroll it into view so the
+      // lazily built list item exists.
+      await _scrollTo(tester, find.text('No stops on this route.'));
+      expect(find.text('No stops on this route.'), findsOneWidget);
+    });
+
+    testWidgets('truck without a plan shows the unassigned empty state',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, noPlannedRoute: true),
+      );
+      expect(find.text('No route assigned.'), findsOneWidget);
+      expect(find.byType(GarbageMapView), findsNothing);
+    });
+
+    testWidgets('assigned route shows the depot end card', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, truckLocation: [3.37, 6.45]),
+      );
+      expect(find.text('Morning run'), findsOneWidget);
+      expect(find.byTooltip('Depot: North Depot'), findsOneWidget);
+      // The end card sits below the stop list; scroll it into view so the
+      // lazily built list item exists.
+      await _scrollTo(tester, find.text('Ends at North Depot'));
+      expect(find.text('Ends at North Depot'), findsOneWidget);
     });
   });
 

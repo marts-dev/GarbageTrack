@@ -162,6 +162,12 @@ def test_collect_vicinity_marks_posts_and_updates_load(client, dispatcher, colle
     )
 
 
+def test_collect_vicinity_defaults_to_30m_radius():
+    from app.schemas.trucks import CollectVicinityRequest
+
+    assert CollectVicinityRequest().radius_meters == 30
+
+
 def test_collect_vicinity_needs_location_and_truck(client, dispatcher, collector):
     truck = _make_truck(client, dispatcher["headers"], current_location=None)
     _assign(client, truck["id"], collector["id"], dispatcher["headers"])

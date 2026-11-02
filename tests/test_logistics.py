@@ -418,3 +418,109 @@ def test_delete_route_requires_logistics_role(client, dispatcher, make_user):
         == 403
     )
     assert client.delete(f"/api/v1/logistics/routes/{route_id}").status_code == 401
+
+
+def _make_route(client, headers, truck_id, depot_id, post_ids, **overrides):
+    payload = {
+        "truck_id": truck_id,
+        "name": "Morning run",
+        "post_ids": post_ids,
+        "depot_ids": [depot_id],
+    }
+    payload.update(overrides)
+    response = client.post("/api/v1/logistics/routes", json=payload, headers=headers)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_truck_planned_route_returns_plan_with_depots(client, dispatcher, make_user):
+    me = make_user()
+    collector = make_user("collector")
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    p1 = _make_post(client, me)
+    p2 = _make_post(client, me)
+    _make_route(client, dispatcher["headers"], truck["id"], depot["id"], [p1["id"], p2["id"]])
+
+    for headers in (collector["headers"], dispatcher["headers"]):
+        response = client.get(f"/api/v1/trucks/{truck['id']}/planned-route", headers=headers)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["truck_id"] == truck["id"]
+        assert body["status"] == "assigned"
+        assert [s["post_id"] for s in body["stops"]] == [p1["id"], p2["id"]]
+        assert [d["id"] for d in body["depots"]] == [depot["id"]]
+        assert body["depots"][0]["name"] == depot["name"]
+        assert body["depots"][0]["location"] == depot["location"]
+
+
+def test_truck_planned_route_404s(client, dispatcher, make_user):
+    collector = make_user("collector")
+    truck = _make_truck(client, dispatcher["headers"])
+    assert (
+        client.get(
+            f"/api/v1/trucks/{truck['id']}/planned-route", headers=collector["headers"]
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/api/v1/trucks/000000000000000000000000/planned-route",
+            headers=collector["headers"],
+        ).status_code
+        == 404
+    )
+    resident = make_user()
+    assert (
+        client.get(
+            f"/api/v1/trucks/{truck['id']}/planned-route", headers=resident["headers"]
+        ).status_code
+        == 403
+    )
+
+
+def test_truck_planned_route_ignores_finished_plans(client, dispatcher, make_user, fake_db):
+    from bson import ObjectId
+
+    me = make_user()
+    collector = make_user("collector")
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    post = _make_post(client, me)
+    route = _make_route(client, dispatcher["headers"], truck["id"], depot["id"], [post["id"]])
+    fake_db["planned_routes"].docs[ObjectId(route["id"])]["status"] = "done"
+
+    assert (
+        client.get(
+            f"/api/v1/trucks/{truck['id']}/planned-route", headers=collector["headers"]
+        ).status_code
+        == 404
+    )
+
+
+def test_truck_planned_route_filters_collected_stops(client, dispatcher, make_user):
+    me = make_user()
+    collector = make_user("collector")
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    p1 = _make_post(client, me)
+    p2 = _make_post(client, me)
+    _make_route(client, dispatcher["headers"], truck["id"], depot["id"], [p1["id"], p2["id"]])
+
+    before = client.get(
+        f"/api/v1/trucks/{truck['id']}/planned-route", headers=collector["headers"]
+    )
+    assert len(before.json()["stops"]) == 2
+
+    collected = client.post(
+        f"/api/v1/trucks/{truck['id']}/collect-vicinity",
+        json={},
+        headers=dispatcher["headers"],
+    )
+    assert collected.status_code == 200, collected.text
+
+    after = client.get(
+        f"/api/v1/trucks/{truck['id']}/planned-route", headers=collector["headers"]
+    )
+    assert after.status_code == 200
+    assert after.json()["stops"] == []

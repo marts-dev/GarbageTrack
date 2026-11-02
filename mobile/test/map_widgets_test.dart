@@ -150,6 +150,30 @@ void main() {
       expect(find.byType(MapPin), findsOneWidget);
     });
 
+    testWidgets('follows an externally changed pick', (tester) async {
+      final a = GeoPoint(longitude: 19.04, latitude: 47.49);
+      final b = GeoPoint(longitude: 19.06, latitude: 47.51);
+      Widget frame(GeoPoint? initial) => _wrap(
+            LocationMapPicker(
+              onChanged: (_) {},
+              initial: initial,
+              tileProvider: _StubTileProvider(),
+            ),
+          );
+      await tester.pumpWidget(frame(a));
+      await tester.pump();
+      expect(find.text('Picked: ${a.short}'), findsOneWidget);
+      await tester.pumpWidget(frame(b));
+      await tester.pump();
+      expect(find.text('Picked: ${b.short}'), findsOneWidget);
+      await tester.pumpWidget(frame(null));
+      await tester.pump();
+      expect(
+        find.text('Tap the map to pick a location, or use GPS.'),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('GPS button is present without locating spinner', (
       tester,
     ) async {
