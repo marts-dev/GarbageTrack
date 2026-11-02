@@ -44,6 +44,7 @@ class TruckUpdate(BaseModel):
     garbage_types: list[GarbageType] | None = Field(default=None, min_length=1)
     status: TruckStatus | None = None
     operator_id: str | None = None
+    current_location: TruckLocation | None = None
 
 
 class AvailabilityUpdate(BaseModel):

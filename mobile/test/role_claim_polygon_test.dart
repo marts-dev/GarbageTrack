@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:garbagetrack/api/api_client.dart';
 import 'package:garbagetrack/api/logistics_api.dart';
 import 'package:garbagetrack/api/truck_api.dart';
@@ -90,6 +91,7 @@ Map<String, dynamic> _postJson(String id, double lng, double lat,
 Map<String, dynamic> _collectionRouteJson({
   List<List<double>>? geometry,
   String geometrySource = 'road',
+  bool emptyStops = false,
 }) =>
     {
       'truck_id': 't1',
@@ -99,6 +101,7 @@ Map<String, dynamic> _collectionRouteJson({
       },
       'remaining_capacity': 2,
       'stops': [
+        if (!emptyStops)
         {
           'post_id': 'p1',
           'location': {
@@ -148,16 +151,23 @@ void main() {
     ];
 
     test('detects inside and outside points', () {
-      expect(pointInPolygon(GeoPoint(longitude: 5, latitude: 5), square), isTrue);
-      expect(pointInPolygon(GeoPoint(longitude: 15, latitude: 5), square), isFalse);
-      expect(pointInPolygon(GeoPoint(longitude: 5, latitude: -1), square), isFalse);
+      expect(
+          pointInPolygon(GeoPoint(longitude: 5, latitude: 5), square), isTrue);
+      expect(pointInPolygon(GeoPoint(longitude: 15, latitude: 5), square),
+          isFalse);
+      expect(pointInPolygon(GeoPoint(longitude: 5, latitude: -1), square),
+          isFalse);
     });
 
     test('treats edges and vertices as enclosed', () {
-      expect(pointInPolygon(GeoPoint(longitude: 0, latitude: 5), square), isTrue);
-      expect(pointInPolygon(GeoPoint(longitude: 5, latitude: 0), square), isTrue);
-      expect(pointInPolygon(GeoPoint(longitude: 0, latitude: 0), square), isTrue);
-      expect(pointInPolygon(GeoPoint(longitude: 10, latitude: 10), square), isTrue);
+      expect(
+          pointInPolygon(GeoPoint(longitude: 0, latitude: 5), square), isTrue);
+      expect(
+          pointInPolygon(GeoPoint(longitude: 5, latitude: 0), square), isTrue);
+      expect(
+          pointInPolygon(GeoPoint(longitude: 0, latitude: 0), square), isTrue);
+      expect(pointInPolygon(GeoPoint(longitude: 10, latitude: 10), square),
+          isTrue);
     });
 
     test('rejects degenerate rings', () {
@@ -192,9 +202,11 @@ void main() {
         GeoPoint(longitude: 20, latitude: 2),
         GeoPoint(longitude: 0, latitude: 2),
       ];
-      expect(pointInPolygon(GeoPoint(longitude: 10, latitude: 1), wide), isTrue);
+      expect(
+          pointInPolygon(GeoPoint(longitude: 10, latitude: 1), wide), isTrue);
       // Swapped coordinates fall outside.
-      expect(pointInPolygon(GeoPoint(longitude: 1, latitude: 10), wide), isFalse);
+      expect(
+          pointInPolygon(GeoPoint(longitude: 1, latitude: 10), wide), isFalse);
     });
   });
 
@@ -308,7 +320,8 @@ void main() {
           );
         }),
       ));
-      final trucks = await api.listTrucks(status: 'enroute', availability: 'working');
+      final trucks =
+          await api.listTrucks(status: 'enroute', availability: 'working');
       expect(seen!.path, '/api/v1/trucks');
       expect(seen!.queryParameters['status'], 'enroute');
       expect(seen!.queryParameters['availability'], 'working');
@@ -316,13 +329,15 @@ void main() {
       expect(trucks.single.operatorId, 'u1');
     });
 
-    test('updateTruck patches fields and propagates a 409 double-bind', () async {
+    test('updateTruck patches fields and propagates a 409 double-bind',
+        () async {
       Map<String, dynamic>? seen;
       final api = TruckApi(ApiClient(
         baseUrl: 'http://x',
         httpClient: MockClient((request) async {
           seen = jsonDecode(request.body) as Map<String, dynamic>;
-          return http.Response(jsonEncode(_truckJson('t1', 'B', operatorId: 'u2')), 200);
+          return http.Response(
+              jsonEncode(_truckJson('t1', 'B', operatorId: 'u2')), 200);
         }),
       ));
       final truck = await api.updateTruck(
@@ -337,7 +352,8 @@ void main() {
       final conflicted = TruckApi(ApiClient(
         baseUrl: 'http://x',
         httpClient: MockClient((_) async => http.Response(
-          jsonEncode({'detail': 'collector already assigned to another truck'}),
+              jsonEncode(
+                  {'detail': 'collector already assigned to another truck'}),
           409,
         )),
       ));
@@ -459,7 +475,8 @@ void main() {
 
     testWidgets('collector lands directly on the collector screen',
         (tester) async {
-      await tester.pumpWidget(_withAuth(authFor('collector'), const HomeScreen()));
+      await tester
+          .pumpWidget(_withAuth(authFor('collector'), const HomeScreen()));
       await tester.pumpAndSettle();
       expect(find.byType(NavigationBar), findsNothing);
       expect(find.text('Collector'), findsOneWidget);
@@ -469,7 +486,8 @@ void main() {
 
     testWidgets('logistics lands directly on the logistics screen',
         (tester) async {
-      await tester.pumpWidget(_withAuth(authFor('logistics'), const HomeScreen()));
+      await tester
+          .pumpWidget(_withAuth(authFor('logistics'), const HomeScreen()));
       await tester.pumpAndSettle();
       expect(find.byType(NavigationBar), findsNothing);
       expect(find.text('Logistics'), findsOneWidget);
@@ -517,7 +535,8 @@ void main() {
           if (request.method == 'GET' && detailMatch != null) {
             final id = detailMatch.group(1)!;
             return http.Response(
-              jsonEncode(_truckJson(id, plates[id]!, operatorId: operators[id])),
+              jsonEncode(
+                  _truckJson(id, plates[id]!, operatorId: operators[id])),
               200,
             );
           }
@@ -633,18 +652,32 @@ void main() {
       List<String> calls, {
       List<List<double>>? geometry,
       int availabilityStatus = 200,
-    }) =>
-        MockClient((request) async {
+      List<double>? truckLocation,
+      List<double>? sharedLocation,
+      bool routeEmptiesOnRefetch = false,
+    }) {
+      var routeCalls = 0;
+      var shared = false;
+      return MockClient((request) async {
           final path = request.url.path;
           calls.add('${request.method} $path');
           if (request.method == 'GET' && path == '/api/v1/trucks/t1') {
             return http.Response(
-              jsonEncode(_truckJson('t1', 'AAA-1', operatorId: operators['t1'])),
+            jsonEncode(_truckJson('t1', 'AAA-1',
+                operatorId: operators['t1'],
+                location:
+                    shared ? sharedLocation ?? truckLocation : truckLocation)),
               200,
             );
           }
           if (request.method == 'GET' && path == '/api/v1/trucks/t1/route') {
-            return http.Response(jsonEncode(_collectionRouteJson(geometry: geometry)), 200);
+          routeCalls++;
+          return http.Response(
+              jsonEncode(_collectionRouteJson(
+                geometry: geometry,
+                emptyStops: routeEmptiesOnRefetch && routeCalls > 1,
+              )),
+              200);
           }
           if (request.method == 'PATCH' &&
               path == '/api/v1/trucks/t1/availability') {
@@ -659,14 +692,28 @@ void main() {
               200,
             );
           }
+        if (request.method == 'POST' &&
+            path == '/api/v1/trucks/t1/location' &&
+            sharedLocation != null) {
+          shared = true;
+          return http.Response(
+            jsonEncode(_truckJson('t1', 'AAA-1',
+                operatorId: operators['t1'], location: sharedLocation)),
+            200,
+          );
+        }
           return http.Response('not found', 404);
         });
+    }
 
     AuthProvider detailAuth(
       Map<String, String?> operators,
       List<String> calls, {
       List<List<double>>? geometry,
       int availabilityStatus = 200,
+      List<double>? truckLocation,
+      List<double>? sharedLocation,
+      bool routeEmptiesOnRefetch = false,
     }) =>
         AuthProvider.withUser(
           _user('collector'),
@@ -677,19 +724,24 @@ void main() {
               calls,
               geometry: geometry,
               availabilityStatus: availabilityStatus,
+              truckLocation: truckLocation,
+              sharedLocation: sharedLocation,
+              routeEmptiesOnRefetch: routeEmptiesOnRefetch,
             ),
           ),
         );
 
     Future<void> pumpDetail(
       WidgetTester tester,
-      AuthProvider auth,
-    ) async {
+      AuthProvider auth, {
+      Future<Position> Function()? positionProvider,
+    }) async {
       await tester.pumpWidget(_withAuth(
         auth,
         TruckDetailScreen(
           truckId: 't1',
           tileProvider: _StubTileProvider(),
+          positionProvider: positionProvider,
         ),
       ));
       await tester.pumpAndSettle();
@@ -723,8 +775,107 @@ void main() {
       await tester.tap(find.text('Status'));
       await tester.pumpAndSettle();
       expect(
-        find.text('Only the assigned operator can change status on this truck.'),
+        find.text(
+            'Only the assigned operator can change status on this truck.'),
         findsOneWidget,
+      );
+    });
+
+    testWidgets('assigned operator sees the share-location button',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      expect(find.text('Share my location'), findsOneWidget);
+    });
+
+    testWidgets('other collectors do not see the share-location button',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'c9'}, calls));
+      expect(find.text('Share my location'), findsNothing);
+    });
+
+    testWidgets('share-location keeps the route and adds a live marker',
+        (tester) async {
+      // Tall screen so the route tab's loading placeholder fits below
+      // the full header (location + share + banner). NOTE: physicalSize
+      // is physical pixels and the test binding runs at DPR 3.
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(800, 1200);
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      final calls = <String>[];
+      final gps = Position(
+        longitude: 9.9,
+        latitude: 9.9,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(0),
+        accuracy: 5,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+      await pumpDetail(
+        tester,
+        detailAuth(
+          {'t1': 'u1'},
+          calls,
+          truckLocation: [3.37, 6.45],
+          sharedLocation: [9.9, 9.9],
+          // The new origin has no posts nearby: any route refetch after
+          // the ping would wipe the map, reproducing the reported bug.
+          routeEmptiesOnRefetch: true,
+        ),
+        positionProvider: () async => gps,
+      );
+      List<MapMarkerData> markers() =>
+          tester.widget<GarbageMapView>(find.byType(GarbageMapView)).markers;
+      // Route loaded; the live marker is skipped while it coincides
+      // with the origin.
+      expect(find.textContaining('1 stops'), findsOneWidget);
+      expect(markers(), hasLength(2));
+
+      await tester.tap(find.text('Share my location'));
+      await tester.pumpAndSettle();
+
+      // The ping lands: header shows the new position.
+      expect(find.textContaining('Truck location updated'), findsOneWidget);
+      expect(find.text('9.9000, 9.9000'), findsOneWidget);
+      // The loaded route is untouched: no refetch, no empty state.
+      expect(find.textContaining('1 stops'), findsOneWidget);
+      expect(find.text('No stops on this route.'), findsNothing);
+      expect(
+        calls.where((c) => c == 'GET /api/v1/trucks/t1/route'),
+        hasLength(1),
+      );
+      expect(
+        calls.where((c) => c == 'GET /api/v1/trucks/t1'),
+        hasLength(1),
+      );
+      expect(calls, contains('POST /api/v1/trucks/t1/location'));
+      // ...and the ping shows as its own marker next to the origin pin.
+      final after = markers();
+      expect(after, hasLength(3));
+      expect(after.any((m) => m.label == 'Origin'), isTrue);
+      expect(
+        after.any((m) =>
+            m.label == 'Current location' &&
+            m.point.longitude == 9.9 &&
+            m.point.latitude == 9.9),
+        isTrue,
+      );
+      // The origin pin is distinct; the truck icon marks the live position.
+      expect(
+        after.firstWhere((m) => m.label == 'Origin').icon,
+        Icons.trip_origin,
+      );
+      expect(
+        after.firstWhere((m) => m.label == 'Current location').icon,
+        Icons.local_shipping,
       );
     });
 
@@ -769,15 +920,15 @@ void main() {
       final calls = <String>[];
       await pumpDetail(
         tester,
-        detailAuth({'t1': 'u1'}, calls, geometry: [
+        detailAuth({'t1': 'u1'}, calls,
+            geometry: [
           [3.37, 6.45],
           [3.371, 6.451],
           [3.375, 6.455],
           [3.38, 6.46],
         ]),
       );
-      final layer =
-          tester.widget<PolylineLayer>(find.byType(PolylineLayer));
+      final layer = tester.widget<PolylineLayer>(find.byType(PolylineLayer));
       expect(layer.polylines, hasLength(1));
       expect(layer.polylines.single.points, hasLength(4));
     });
@@ -785,8 +936,7 @@ void main() {
     testWidgets('route map falls back to straight lines', (tester) async {
       final calls = <String>[];
       await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
-      final layer =
-          tester.widget<PolylineLayer>(find.byType(PolylineLayer));
+      final layer = tester.widget<PolylineLayer>(find.byType(PolylineLayer));
       expect(layer.polylines, hasLength(1));
       // Origin + one stop.
       expect(layer.polylines.single.points, hasLength(2));
@@ -794,8 +944,8 @@ void main() {
   });
 
   group('polygon route creation', () {
-    Map<String, dynamic> facilityJson(String id, String name, String kind,
-            double lng, double lat) =>
+    Map<String, dynamic> facilityJson(
+            String id, String name, String kind, double lng, double lat) =>
         {
           'id': id,
           'name': name,
@@ -840,15 +990,17 @@ void main() {
               200,
             );
           }
-          if (request.method == 'GET' && path == '/api/v1/logistics/facilities') {
+          if (request.method == 'GET' &&
+              path == '/api/v1/logistics/facilities') {
             return http.Response(jsonEncode(facilities), 200);
           }
           if (request.method == 'GET' && path == '/api/v1/logistics/garbage') {
             return http.Response(jsonEncode(posts), 200);
           }
           if (request.method == 'POST' && path == '/api/v1/logistics/routes') {
-            onRouteBody?.call()?.addAll(
-                jsonDecode(request.body) as Map<String, dynamic>);
+            onRouteBody
+                ?.call()
+                ?.addAll(jsonDecode(request.body) as Map<String, dynamic>);
             return http.Response(
               jsonEncode({
                 'id': 'r1',
@@ -898,7 +1050,9 @@ void main() {
           _postJson('p1', 3.37, 6.45, 'Ojota'),
           _postJson('p2', 3.60, 6.80, 'Ikeja'),
         ],
-        facilities: [facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
         onRouteBody: () => submitted,
       ));
       await tester.pumpWidget(
@@ -940,7 +1094,8 @@ void main() {
       expect(submitted['post_ids'], ['p1']);
     });
 
-    testWidgets('first-selected depot is the labeled route end', (tester) async {
+    testWidgets('first-selected depot is the labeled route end',
+        (tester) async {
       final submitted = <String, dynamic>{};
       final auth = routeAuth(routeBackend(
         posts: [],
@@ -978,7 +1133,9 @@ void main() {
           _postJson('p1', 3.37, 6.45, 'Ojota'),
           _postJson('p2', 3.60, 6.80, 'Ikeja'),
         ],
-        facilities: [facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
         truckLocation: [3.10, 6.10],
       ));
       await tester.pumpWidget(
@@ -998,7 +1155,9 @@ void main() {
     testWidgets('undo and clear edit the drawn area', (tester) async {
       final auth = routeAuth(routeBackend(
         posts: [_postJson('p1', 3.37, 6.45, 'Ojota')],
-        facilities: [facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
       ));
       await tester.pumpWidget(
         _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
@@ -1051,13 +1210,26 @@ void main() {
           'collection_points': [],
         };
 
+    Map<String, dynamic> collectorJson(String id, String name) => {
+          'id': id,
+          'email': '$id@example.com',
+          'full_name': name,
+          'role': 'collector',
+          'is_active': true,
+          'country': null,
+        };
+
     MockClient logisticsBackend(
       List<Map<String, dynamic>> routes,
       List<String> calls, {
       int deleteStatus = 204,
       List<Map<String, dynamic>> facilities = const [],
-    }) =>
-        MockClient((request) async {
+      Map<String, dynamic>? truck,
+      List<Map<String, dynamic>> collectors = const [],
+      int usersFailTimes = 0,
+    }) {
+      var usersCalls = 0;
+      return MockClient((request) async {
           final path = request.url.path;
           calls.add('${request.method} $path');
           if (request.method == 'GET' && path == '/api/v1/logistics/routes') {
@@ -1066,6 +1238,17 @@ void main() {
           if (request.method == 'GET' &&
               path == '/api/v1/logistics/facilities') {
             return http.Response(jsonEncode(facilities), 200);
+          }
+          if (request.method == 'GET' && path == '/api/v1/trucks/t1') {
+            if (truck == null) return http.Response('not found', 404);
+            return http.Response(jsonEncode(truck), 200);
+          }
+          if (request.method == 'GET' && path == '/api/v1/auth/users') {
+            usersCalls++;
+            if (usersCalls <= usersFailTimes) {
+              return http.Response(jsonEncode({'detail': 'boom'}), 500);
+            }
+            return http.Response(jsonEncode(collectors), 200);
           }
           if (request.method == 'DELETE' &&
               path == '/api/v1/logistics/routes/r1') {
@@ -1080,12 +1263,16 @@ void main() {
           }
           return http.Response('not found', 404);
         });
+    }
 
     AuthProvider logisticsAuth(
       List<Map<String, dynamic>> routes,
       List<String> calls, {
       int deleteStatus = 204,
       List<Map<String, dynamic>> facilities = const [],
+      Map<String, dynamic>? truck,
+      List<Map<String, dynamic>> collectors = const [],
+      int usersFailTimes = 0,
     }) =>
         AuthProvider.withUser(
           _user('logistics'),
@@ -1096,6 +1283,9 @@ void main() {
               calls,
               deleteStatus: deleteStatus,
               facilities: facilities,
+              truck: truck,
+              collectors: collectors,
+              usersFailTimes: usersFailTimes,
             ),
           ),
         );
@@ -1185,13 +1375,155 @@ void main() {
       expect(find.byType(RouteDetailScreen), findsOneWidget);
       expect(find.byType(GarbageMapView), findsOneWidget);
       expect(find.text('Stops (1)'), findsOneWidget);
-      // Origin + stop + depot pins render on the layered map.
+      // Origin + stop + depot pins render on the layered map (the truck
+      // lookup 404s here, so no live position pin is added).
       expect(find.byType(MapPin), findsNWidgets(3));
-      expect(
-        find.byTooltip('Start: truck position'),
-        findsOneWidget,
-      );
+      expect(find.byTooltip('Origin'), findsOneWidget);
       expect(find.byTooltip('Depot: North Depot'), findsOneWidget);
+      final markers =
+          tester.widget<GarbageMapView>(find.byType(GarbageMapView)).markers;
+      // The origin pin is distinct from the truck icon, which is reserved
+      // for the collector's live position.
+      expect(
+        markers.firstWhere((m) => m.label == 'Origin').icon,
+        Icons.trip_origin,
+      );
+    });
+
+    testWidgets('route detail shows the live truck position', (tester) async {
+      final calls = <String>[];
+      final routes = [plannedRouteJson('r1', 'Morning run')];
+      final auth = logisticsAuth(
+        routes,
+        calls,
+        truck: _truckJson('t1', 'AAA-1', location: [3.50, 6.60]),
+      );
+      await openRoutesTab(tester, auth);
+      await tester.tap(find.text('Morning run'));
+      await tester.pumpAndSettle();
+      // Origin + live truck + stop pins render on the layered map.
+      expect(find.byType(MapPin), findsNWidgets(3));
+      expect(find.byTooltip('Origin'), findsOneWidget);
+      expect(find.byTooltip('Current location'), findsOneWidget);
+      final markers =
+          tester.widget<GarbageMapView>(find.byType(GarbageMapView)).markers;
+      expect(
+        markers.firstWhere((m) => m.label == 'Origin').icon,
+        Icons.trip_origin,
+      );
+      final live = markers.firstWhere((m) => m.label == 'Current location');
+      expect(live.icon, Icons.local_shipping);
+      expect(live.point.longitude, 3.50);
+      expect(live.point.latitude, 6.60);
+    });
+
+    testWidgets('header expands to assignment details lazily', (tester) async {
+      final calls = <String>[];
+      final routes = [plannedRouteJson('r1', 'Morning run')];
+      final auth = logisticsAuth(
+        routes,
+        calls,
+        facilities: [
+          {
+            'id': 'f1',
+            'name': 'North Depot',
+            'kind': 'dump_site',
+            'location': {
+              'type': 'Point',
+              'coordinates': [3.20, 6.30]
+            },
+            'accepted_types': ['plastic'],
+            'address': null,
+            'created_at': '2026-10-29T00:00:00Z',
+            'updated_at': '2026-10-29T00:00:00Z',
+          }
+        ],
+        truck: _truckJson('t1', 'AAA-1',
+            operatorId: 'c1', location: [3.50, 6.60]),
+        collectors: [collectorJson('c1', 'Ada Collector')],
+      );
+      await openRoutesTab(tester, auth);
+      await tester.tap(find.text('Morning run'));
+      await tester.pumpAndSettle();
+
+      // Collapsed summary names the truck and depot; no collector fetch yet.
+      expect(find.byTooltip('Show more'), findsOneWidget);
+      expect(find.text('AAA-1 · North Depot'), findsOneWidget);
+      expect(find.text('Ada Collector'), findsNothing);
+      expect(calls.where((c) => c == 'GET /api/v1/auth/users'), isEmpty);
+
+      await tester.tap(find.byTooltip('Show more'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ada Collector'), findsOneWidget);
+      expect(find.text('AAA-1 · Enroute · Working'), findsOneWidget);
+      expect(find.text('North Depot (End)'), findsOneWidget);
+      expect(
+        calls.where((c) => c == 'GET /api/v1/auth/users'),
+        hasLength(1),
+      );
+
+      // Collapse and re-expand reuses the loaded directory.
+      await tester.tap(find.byTooltip('Show less'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ada Collector'), findsNothing);
+      await tester.tap(find.byTooltip('Show more'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ada Collector'), findsOneWidget);
+      expect(
+        calls.where((c) => c == 'GET /api/v1/auth/users'),
+        hasLength(1),
+      );
+    });
+
+    testWidgets('expanded header shows Unassigned without fetching collectors',
+        (tester) async {
+      final calls = <String>[];
+      final routes = [plannedRouteJson('r1', 'Morning run')];
+      final auth = logisticsAuth(
+        routes,
+        calls,
+        truck: _truckJson('t1', 'AAA-1'),
+      );
+      await openRoutesTab(tester, auth);
+      await tester.tap(find.text('Morning run'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Show more'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unassigned'), findsOneWidget);
+      expect(calls.where((c) => c == 'GET /api/v1/auth/users'), isEmpty);
+    });
+
+    testWidgets('collector lookup failure offers retry', (tester) async {
+      final calls = <String>[];
+      final routes = [plannedRouteJson('r1', 'Morning run')];
+      final auth = logisticsAuth(
+        routes,
+        calls,
+        truck: _truckJson('t1', 'AAA-1', operatorId: 'c1'),
+        collectors: [collectorJson('c1', 'Ada Collector')],
+        usersFailTimes: 1,
+      );
+      await openRoutesTab(tester, auth);
+      await tester.tap(find.text('Morning run'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Show more'));
+      await tester.pumpAndSettle();
+
+      expect(find.text("Couldn't load operator"), findsOneWidget);
+      expect(find.text('Ada Collector'), findsNothing);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ada Collector'), findsOneWidget);
+      expect(
+        calls.where((c) => c == 'GET /api/v1/auth/users'),
+        hasLength(2),
+      );
     });
   });
 

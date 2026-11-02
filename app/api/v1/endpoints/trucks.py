@@ -12,6 +12,7 @@ from app.schemas.trucks import (
     CollectionRouteResponse,
     CollectVicinityRequest,
     CollectVicinityResponse,
+    TruckLocation,
     TruckResponse,
     TruckScheduleCreate,
     TruckUpdate,
@@ -148,6 +149,16 @@ async def collect_vicinity(truck_id: str, payload: CollectVicinityRequest, user:
 async def update_availability(truck_id: str, payload: AvailabilityUpdate, user: Collector, db: Db):
     try:
         return await trucks_service.set_availability(db, truck_id, payload.availability, user)
+    except TruckNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
+    except TruckNotAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from None
+
+
+@router.post("/{truck_id}/location", response_model=TruckResponse)
+async def update_location(truck_id: str, payload: TruckLocation, user: Collector, db: Db):
+    try:
+        return await trucks_service.update_truck_location(db, truck_id, payload, user)
     except TruckNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
     except TruckNotAssignedError as exc:

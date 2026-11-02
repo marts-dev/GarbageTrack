@@ -91,6 +91,20 @@ class TruckApi {
     return Truck.fromJson(body as Map<String, dynamic>);
   }
 
+  /// Pings the truck's live position. Collectors may only ping the truck
+  /// they operate (403 otherwise); logistics/admin may ping any truck.
+  Future<Truck> updateLocation(
+    String truckId, {
+    required double longitude,
+    required double latitude,
+  }) async {
+    final body = await _client.postJson('/trucks/$truckId/location', body: {
+      'longitude': longitude,
+      'latitude': latitude,
+    });
+    return Truck.fromJson(body as Map<String, dynamic>);
+  }
+
   /// Lists trucks for operations roles (collector, logistics, admin).
   Future<List<Truck>> listTrucks({
     String? status,
@@ -116,6 +130,8 @@ class TruckApi {
     String? status,
     String? operatorId,
     bool operatorIdSet = false,
+    double? longitude,
+    double? latitude,
   }) async {
     final body = await _client.patchJson('/trucks/$truckId', body: {
       if (plateNumber != null) 'plate_number': plateNumber,
@@ -123,6 +139,8 @@ class TruckApi {
       if (garbageTypes != null) 'garbage_types': garbageTypes,
       if (status != null) 'status': status,
       if (operatorIdSet) 'operator_id': operatorId,
+      if (longitude != null && latitude != null)
+        'current_location': {'longitude': longitude, 'latitude': latitude},
     });
     return Truck.fromJson(body as Map<String, dynamic>);
   }

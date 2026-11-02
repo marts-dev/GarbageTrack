@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
@@ -13,18 +14,29 @@ import '../widgets/inputs.dart';
 import '../widgets/location_picker.dart';
 
 class TruckDetailScreen extends StatelessWidget {
-  const TruckDetailScreen({super.key, required this.truckId, this.tileProvider});
+  const TruckDetailScreen(
+      {super.key,
+      required this.truckId,
+      this.tileProvider,
+      this.positionProvider});
 
   final String truckId;
 
   /// Overrides tile loading (e.g. an offline stub in widget tests).
   final TileProvider? tileProvider;
 
+  /// Overrides GPS lookup (e.g. a fixed position in widget tests).
+  final Future<Position> Function()? positionProvider;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Truck')),
-      body: TruckDetailBody(truckId: truckId, tileProvider: tileProvider),
+      body: TruckDetailBody(
+        truckId: truckId,
+        tileProvider: tileProvider,
+        positionProvider: positionProvider,
+      ),
     );
   }
 }
@@ -32,20 +44,82 @@ class TruckDetailScreen extends StatelessWidget {
 /// Truck detail content without the surrounding [Scaffold], so the collector
 /// home screen can land directly on the assigned truck inside its own shell.
 class TruckDetailBody extends StatefulWidget {
-  const TruckDetailBody({super.key, required this.truckId, this.tileProvider});
+  const TruckDetailBody(
+      {super.key,
+      required this.truckId,
+      this.tileProvider,
+      this.positionProvider});
 
   final String truckId;
 
   /// Overrides tile loading (e.g. an offline stub in widget tests).
   final TileProvider? tileProvider;
 
+  /// Overrides GPS lookup (e.g. a fixed position in widget tests).
+  final Future<Position> Function()? positionProvider;
+
   @override
   State<TruckDetailBody> createState() => _TruckDetailBodyState();
 }
 
 class _TruckDetailBodyState extends State<TruckDetailBody> {
-  int _reload = 0;
+  int _routeReload = 0;
   bool _busy = false;
+
+  /// Hoisted truck future: creating it in [build] would resubscribe the
+  /// [FutureBuilder] on every [setState], flashing the loader and wiping
+  /// tab state (including the loaded route). Only retry and truck switches
+  /// replace it.
+  late Future<Truck> _truckFuture;
+
+  /// Latest truck known from a mutation response. Mutations refresh the
+  /// header from their own response instead of replacing [_truckFuture],
+  /// so tab state (loaded route, type filter, collect form) survives a
+  /// share/status/collect action.
+  Truck? _freshTruck;
+
+  @override
+  void initState() {
+    super.initState();
+    _truckFuture = _fetchTruck();
+  }
+
+  @override
+  void didUpdateWidget(covariant TruckDetailBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.truckId != oldWidget.truckId) {
+      _freshTruck = null;
+      _truckFuture = _fetchTruck();
+    }
+  }
+
+  Future<Truck> _fetchTruck() =>
+      context.read<AuthProvider>().trucks.getTruck(widget.truckId);
+
+  Future<void> _shareLocation() async {
+    final api = context.read<AuthProvider>().trucks;
+    setState(() => _busy = true);
+    try {
+      final locate = widget.positionProvider ?? requestCurrentPosition;
+      final position = await locate();
+      final truck = await api.updateLocation(
+        widget.truckId,
+        longitude: position.longitude,
+        latitude: position.latitude,
+      );
+      if (mounted) {
+        showOk(context,
+            'Truck location updated (${truck.currentLocation!.short})');
+        // Header only: the ping must not re-anchor the loaded route, so
+        // the route tab is deliberately left untouched here.
+        setState(() => _freshTruck = truck);
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   Future<void> _setAvailability(String value) async {
     setState(() => _busy = true);
@@ -55,8 +129,14 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
           .trucks
           .setAvailability(widget.truckId, value);
       if (mounted) {
-        showOk(context, 'Status: ${pretty(truck.availability)} (load ${truck.load})');
-        setState(() => _reload++);
+        showOk(context,
+            'Status: ${pretty(truck.availability)} (load ${truck.load})');
+        // The load may have reset, which changes remaining capacity, so
+        // the route refetches while the rest of the tab state is kept.
+        setState(() {
+          _freshTruck = truck;
+          _routeReload++;
+        });
       }
     } catch (e) {
       if (mounted) showError(context, e);
@@ -65,16 +145,39 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
     }
   }
 
+  /// Refreshes the header after a vicinity collect and refetches the
+  /// route so collected posts drop out of the stop list.
+  Future<void> _refreshAfterCollect() async {
+    try {
+      final truck =
+          await context.read<AuthProvider>().trucks.getTruck(widget.truckId);
+      if (!mounted) return;
+      setState(() {
+        _freshTruck = truck;
+        _routeReload++;
+      });
+    } catch (_) {
+      // The collect itself already succeeded (its result card shows in
+      // the tab); still refetch the route, which surfaces its own error
+      // UI if the network is actually down.
+      if (mounted) setState(() => _routeReload++);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     return FutureBuilder(
-      key: ValueKey(_reload),
-      future: auth.trucks.getTruck(widget.truckId),
+      future: _truckFuture,
       builder: (context, snapshot) => AsyncView<Truck>(
         snapshot: snapshot,
-        onRetry: () => setState(() => _reload++),
-        builder: (context, truck) => DefaultTabController(
+        onRetry: () => setState(() {
+          _freshTruck = null;
+          _truckFuture = _fetchTruck();
+        }),
+        builder: (context, loaded) {
+          final truck = _freshTruck ?? loaded;
+          return DefaultTabController(
           length: 3,
           child: Column(
             children: [
@@ -124,6 +227,15 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ],
+                          if (auth.user?.isCollector == true &&
+                              truck.isOperatedBy(auth.user!.id)) ...[
+                            const SizedBox(height: 8),
+                            FilledButton.tonalIcon(
+                              onPressed: _busy ? null : _shareLocation,
+                              icon: const Icon(Icons.my_location_outlined),
+                              label: const Text('Share my location'),
+                            ),
+                          ],
                         const SizedBox(height: 4),
                         Text(
                           'Takes:',
@@ -156,6 +268,7 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                     _RouteTab(
                       truck: truck,
                       tileProvider: widget.tileProvider,
+                        extraReload: _routeReload,
                     ),
                     _CollectTab(
                       truck: truck,
@@ -164,7 +277,7 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                       // bypasses the binding check for logistics/admins.
                       assignedGuarded: auth.user?.role == 'collector' &&
                           !truck.isOperatedBy(auth.user!.id),
-                      onChanged: () => setState(() => _reload++),
+                        onChanged: _refreshAfterCollect,
                     ),
                     _StatusTab(
                       truck: truck,
@@ -178,7 +291,8 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
               ),
             ],
           ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -219,9 +333,15 @@ class _AssignmentRow extends StatelessWidget {
 }
 
 class _RouteTab extends StatefulWidget {
-  const _RouteTab({required this.truck, this.tileProvider});
+  const _RouteTab(
+      {required this.truck, this.tileProvider, required this.extraReload});
   final Truck truck;
   final TileProvider? tileProvider;
+
+  /// Bumped by the parent when the route must refetch (collect,
+  /// availability). Location pings deliberately leave it alone so the
+  /// loaded route keeps its origin.
+  final int extraReload;
 
   @override
   State<_RouteTab> createState() => _RouteTabState();
@@ -229,11 +349,37 @@ class _RouteTab extends StatefulWidget {
 
 class _RouteTabState extends State<_RouteTab> {
   final _types = <String>{};
-  int _reload = 0;
+
+  /// Hoisted route future: creating it in [build] would resubscribe the
+  /// [FutureBuilder] on every parent rebuild (e.g. a location ping
+  /// refreshing the header), re-anchoring the route to the new origin.
+  /// It is replaced only for a new truck, a filter change, an explicit
+  /// parent reload signal, or retry.
+  late Future<CollectionRoute> _routeFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _routeFuture = _loadRoute();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RouteTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.truck.id != oldWidget.truck.id ||
+        widget.extraReload != oldWidget.extraReload) {
+      _routeFuture = _loadRoute();
+    }
+  }
+
+  Future<CollectionRoute> _loadRoute() =>
+      context.read<AuthProvider>().trucks.getRoute(
+            widget.truck.id,
+            types: _types.isEmpty ? null : _types.toList(),
+          );
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
     return Column(
       children: [
         Padding(
@@ -244,20 +390,16 @@ class _RouteTabState extends State<_RouteTab> {
               _types
                 ..clear()
                 ..addAll(next);
-              _reload++;
+              _routeFuture = _loadRoute();
             }),
           ),
         ),
         Expanded(
           child: FutureBuilder(
-            key: ValueKey((_reload, _types.join(','))),
-            future: auth.trucks.getRoute(
-              widget.truck.id,
-              types: _types.isEmpty ? null : _types.toList(),
-            ),
+            future: _routeFuture,
             builder: (context, snapshot) => AsyncView<CollectionRoute>(
               snapshot: snapshot,
-              onRetry: () => setState(() => _reload++),
+              onRetry: () => setState(() => _routeFuture = _loadRoute()),
               builder: (context, route) {
                 if (route.stops.isEmpty) {
                   return const EmptyState(
@@ -286,11 +428,28 @@ class _RouteTabState extends State<_RouteTab> {
                         child: GarbageMapView(
                           tileProvider: widget.tileProvider,
                           markers: [
+                            // Distinct origin pin: the truck icon is reserved
+                            // for the collector's live position below.
                             MapMarkerData(
                               point: route.origin,
-                              icon: Icons.local_shipping,
+                              icon: Icons.trip_origin,
                               label: 'Origin',
                             ),
+                            // The collector's live position along the route.
+                            // It rides along with the header truck, never
+                            // re-anchoring the loaded route; skipped while it
+                            // coincides with the origin pin.
+                            if (widget.truck.currentLocation != null &&
+                                (widget.truck.currentLocation!.longitude !=
+                                        route.origin.longitude ||
+                                    widget.truck.currentLocation!.latitude !=
+                                        route.origin.latitude))
+                              MapMarkerData(
+                                point: widget.truck.currentLocation!,
+                                icon: Icons.local_shipping,
+                                color: Colors.blue,
+                                label: 'Current location',
+                              ),
                             for (final stop in route.stops)
                               MapMarkerData(
                                 point: stop.location,
@@ -372,8 +531,7 @@ class _CollectTabState extends State<_CollectTab> {
       _result = null;
     });
     try {
-      final result =
-          await context.read<AuthProvider>().trucks.collectVicinity(
+      final result = await context.read<AuthProvider>().trucks.collectVicinity(
                 widget.truck.id,
                 longitude: _point?.longitude,
                 latitude: _point?.latitude,
@@ -393,8 +551,7 @@ class _CollectTabState extends State<_CollectTab> {
   @override
   Widget build(BuildContext context) {
     final result = _result;
-    final viewport =
-        viewportFor(context.watch<AuthProvider>().country);
+    final viewport = viewportFor(context.watch<AuthProvider>().country);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -404,7 +561,8 @@ class _CollectTabState extends State<_CollectTab> {
             color: Theme.of(context).colorScheme.secondaryContainer,
             child: const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Only the assigned operator can collect on this truck.'),
+              child:
+                  Text('Only the assigned operator can collect on this truck.'),
             ),
           ),
           const SizedBox(height: 12),
@@ -414,7 +572,8 @@ class _CollectTabState extends State<_CollectTab> {
           style: Theme.of(context).textTheme.bodyMedium,
         ),
         const SizedBox(height: 12),
-        Text('Position (optional)', style: Theme.of(context).textTheme.titleMedium),
+        Text('Position (optional)',
+            style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         LocationMapPicker(
           onChanged: (point) => setState(() => _point = point),
@@ -435,7 +594,9 @@ class _CollectTabState extends State<_CollectTab> {
           onPressed: (_busy || widget.assignedGuarded) ? null : _collect,
           child: _busy
               ? const SizedBox(
-                  width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
               : const Text('Collect vicinity'),
         ),
         if (result != null) ...[
@@ -447,9 +608,12 @@ class _CollectTabState extends State<_CollectTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Result', style: Theme.of(context).textTheme.titleMedium),
+                  Text('Result',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  InfoRow(label: 'Collected', value: '${result.collectedCount} posts'),
+                  InfoRow(
+                      label: 'Collected',
+                      value: '${result.collectedCount} posts'),
                   InfoRow(label: 'Load', value: '${result.load}'),
                   InfoRow(label: 'Status', value: pretty(result.availability)),
                 ],
@@ -488,7 +652,8 @@ class _StatusTab extends StatelessWidget {
             color: Theme.of(context).colorScheme.secondaryContainer,
             child: const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Only the assigned operator can change status on this truck.'),
+              child: Text(
+                  'Only the assigned operator can change status on this truck.'),
             ),
           ),
           const SizedBox(height: 12),

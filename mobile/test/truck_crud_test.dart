@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:garbagetrack/api/api_client.dart';
 import 'package:garbagetrack/api/auth_api.dart';
+import 'package:garbagetrack/api/truck_api.dart';
 import 'package:garbagetrack/models/models.dart';
 import 'package:garbagetrack/screens/logistics_home_screen.dart';
 import 'package:garbagetrack/screens/truck_form_screen.dart';
@@ -33,6 +34,20 @@ Widget _withAuth(AuthProvider auth, Widget home) =>
       value: auth,
       child: MaterialApp(home: home),
     );
+
+/// Gives form tests a tall screen so the whole form (including the map
+/// card) builds at once. Otherwise rows beyond the cache extent have no
+/// elements to find, and scrolled-away fields lose validation errors.
+void _useTallSurface(WidgetTester tester) {
+  // NOTE: physicalSize is in physical pixels; the test binding runs at
+  // DPR 3, so pin DPR 1 to get a true 800x2400 logical surface.
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(800, 2400);
+  addTearDown(() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
+}
 
 Map<String, dynamic> _truckJson(
   String id,
@@ -83,10 +98,44 @@ void main() {
     });
   });
 
+  group('truck location client', () {
+    test('updateLocation posts coordinates to the location endpoint', () async {
+      Uri? seen;
+      Map<String, dynamic>? body;
+      final api = TruckApi(ApiClient(
+        baseUrl: 'http://x',
+        httpClient: MockClient((request) async {
+          seen = request.url;
+          body = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(jsonEncode(_truckJson('t1', 'AAA-1')), 200);
+        }),
+      ));
+      await api.updateLocation('t1', longitude: 121.0, latitude: 14.6);
+      expect(seen!.path, '/api/v1/trucks/t1/location');
+      expect(body, {'longitude': 121.0, 'latitude': 14.6});
+    });
+
+    test('updateTruck sends current_location only when given', () async {
+      Map<String, dynamic>? body;
+      final api = TruckApi(ApiClient(
+        baseUrl: 'http://x',
+        httpClient: MockClient((request) async {
+          body = jsonDecode(request.body) as Map<String, dynamic>;
+          return http.Response(jsonEncode(_truckJson('t1', 'AAA-1')), 200);
+        }),
+      ));
+      await api.updateTruck('t1', longitude: 1.0, latitude: 2.0);
+      expect(body!['current_location'], {'longitude': 1.0, 'latitude': 2.0});
+      await api.updateTruck('t1', plateNumber: 'BBB-2');
+      expect(body!.containsKey('current_location'), isFalse);
+    });
+  });
+
   group('truck form', () {
     MockClient formBackend(
       List<String> calls, {
       Map<String, dynamic>? patchBodies,
+      Map<String, dynamic>? postBodies,
       int patchStatus = 200,
       String patchDetail = '',
     }) =>
@@ -105,6 +154,7 @@ void main() {
           }
           if (request.method == 'POST' && path == '/api/v1/trucks/schedules') {
             final body = jsonDecode(request.body) as Map<String, dynamic>;
+            postBodies?.addAll(body);
             return http.Response(
               jsonEncode(_truckJson(
                 't9',
@@ -133,6 +183,7 @@ void main() {
     AuthProvider formAuth(
       List<String> calls, {
       Map<String, dynamic>? patchBodies,
+      Map<String, dynamic>? postBodies,
       int patchStatus = 200,
       String patchDetail = '',
     }) =>
@@ -143,6 +194,7 @@ void main() {
             httpClient: formBackend(
               calls,
               patchBodies: patchBodies,
+              postBodies: postBodies,
               patchStatus: patchStatus,
               patchDetail: patchDetail,
             ),
@@ -172,9 +224,10 @@ void main() {
     }
 
     testWidgets('plate is required', (tester) async {
+      _useTallSurface(tester);
       final calls = <String>[];
       await tester.pumpWidget(
-        _withAuth(formAuth(calls), const TruckFormScreen()),
+        _withAuth(formAuth(calls), TruckFormScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await scrollTap(tester, find.text('Register truck'));
@@ -185,7 +238,7 @@ void main() {
     testWidgets('at least one garbage type is required', (tester) async {
       final calls = <String>[];
       await tester.pumpWidget(
-        _withAuth(formAuth(calls), const TruckFormScreen()),
+        _withAuth(formAuth(calls), TruckFormScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).first, 'NEW-1');
@@ -198,7 +251,7 @@ void main() {
         (tester) async {
       final calls = <String>[];
       await tester.pumpWidget(
-        _withAuth(formAuth(calls), const TruckFormScreen()),
+        _withAuth(formAuth(calls), TruckFormScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).first, 'NEW-1');
@@ -216,9 +269,11 @@ void main() {
       final patchBodies = <String, dynamic>{};
       await tester.pumpWidget(
         _withAuth(formAuth(calls, patchBodies: patchBodies),
-            const TruckFormScreen()),
+            TruckFormScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
+      // Enter the plate first while the top of the form is onstage.
+      await tester.enterText(find.byType(TextFormField).first, 'NEW-1');
       // Only collectors are offered; the logistics user is filtered out.
       await scrollTap(tester, find.text('Unassigned'));
       expect(find.text('Collector c1 · c1@x.com'), findsOneWidget);
@@ -226,7 +281,6 @@ void main() {
       await tester.tap(find.text('Collector c1 · c1@x.com').last);
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextFormField).first, 'NEW-1');
       await scrollTap(tester, find.text('Plastic'));
       await scrollTap(tester, find.text('Register truck'));
       expect(find.text('New truck'), findsNothing);
@@ -237,13 +291,14 @@ void main() {
 
     testWidgets('edit pre-selects the operator and patches fields',
         (tester) async {
+      _useTallSurface(tester);
       final calls = <String>[];
       final patchBodies = <String, dynamic>{};
       final existing =
           Truck.fromJson(_truckJson('t1', 'AAA-1', operatorId: 'c2'));
       await tester.pumpWidget(
         _withAuth(formAuth(calls, patchBodies: patchBodies),
-            TruckFormScreen(existing: existing)),
+            TruckFormScreen(existing: existing, tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       expect(find.text('Edit truck'), findsOneWidget);
@@ -266,7 +321,7 @@ void main() {
           Truck.fromJson(_truckJson('t1', 'AAA-1', operatorId: 'c2'));
       await tester.pumpWidget(
         _withAuth(formAuth(calls, patchBodies: patchBodies),
-            TruckFormScreen(existing: existing)),
+            TruckFormScreen(existing: existing, tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await scrollTap(tester, find.text('Collector c2 · c2@x.com'));
@@ -275,6 +330,46 @@ void main() {
       await scrollTap(tester, find.text('Save changes'));
       expect(patchBodies.containsKey('operator_id'), isTrue);
       expect(patchBodies['operator_id'], isNull);
+    });
+
+    testWidgets('create sends the picked map location', (tester) async {
+      final calls = <String>[];
+      final postBodies = <String, dynamic>{};
+      await tester.pumpWidget(
+        _withAuth(formAuth(calls, postBodies: postBodies),
+            TruckFormScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, 'NEW-LOC');
+      await scrollTap(tester, find.text('Plastic'));
+      await scrollTap(tester, find.byType(FlutterMap));
+      await scrollTap(tester, find.text('Register truck'));
+      expect(find.text('New truck'), findsNothing);
+      expect(calls, contains('POST /api/v1/trucks/schedules'));
+      final location =
+          postBodies['current_location'] as Map<String, dynamic>;
+      expect(location['longitude'], isA<double>());
+      expect(location['latitude'], isA<double>());
+    });
+
+    testWidgets('edit sends the picked map location', (tester) async {
+      final calls = <String>[];
+      final patchBodies = <String, dynamic>{};
+      final existing = Truck.fromJson(_truckJson('t1', 'AAA-1'));
+      await tester.pumpWidget(
+        _withAuth(formAuth(calls, patchBodies: patchBodies),
+            TruckFormScreen(
+                existing: existing,
+                tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await scrollTap(tester, find.byType(FlutterMap));
+      await scrollTap(tester, find.text('Save changes'));
+      expect(find.text('Edit truck'), findsNothing);
+      expect(
+        patchBodies['current_location'] as Map<String, dynamic>,
+        containsPair('longitude', isA<double>()),
+      );
     });
 
     testWidgets('double-bind 409 surfaces the server detail', (tester) async {
@@ -288,7 +383,7 @@ void main() {
             patchStatus: 409,
             patchDetail: 'collector already assigned to another truck',
           ),
-          TruckFormScreen(existing: existing),
+          TruckFormScreen(existing: existing, tileProvider: _StubTileProvider()),
         ),
       );
       await tester.pumpAndSettle();
@@ -431,6 +526,7 @@ void main() {
     });
 
     testWidgets('edit opens the prefilled form', (tester) async {
+      _useTallSurface(tester);
       final calls = <String>[];
       final trucks = [_truckJson('t1', 'AAA-1', operatorId: 'c1')];
       await openTrucksTab(tester, trucksAuth(trucks, calls));

@@ -241,6 +241,43 @@ void main() {
       final clusters = clusterMarkers(markers, zoom: 10);
       expect(clusters.single.center, const LatLng(0, 0));
     });
+
+    test('keeps different cluster groups separate', () {
+      MapMarkerData grouped(double lng, double lat, String? group) =>
+          MapMarkerData(
+            point: GeoPoint(longitude: lng, latitude: lat),
+            clusterGroup: group,
+          );
+      final markers = [
+        grouped(3.37, 6.45, MarkerGroups.garbage),
+        grouped(3.37, 6.45, MarkerGroups.garbage),
+        grouped(3.37, 6.45, MarkerGroups.depot),
+        grouped(3.37, 6.45, MarkerGroups.depot),
+        grouped(3.37, 6.45, MarkerGroups.truck),
+      ];
+      final clusters = clusterMarkers(markers, zoom: 14);
+      expect(clusters, hasLength(3));
+      final byGroup = {for (final c in clusters) c.group: c.memberIndices};
+      expect(byGroup[MarkerGroups.garbage], [0, 1]);
+      expect(byGroup[MarkerGroups.depot], [2, 3]);
+      expect(byGroup[MarkerGroups.truck], [4]);
+    });
+
+    test('ungrouped markers cluster apart from grouped ones', () {
+      final markers = [
+        pin(0, 0),
+        pin(0, 0),
+        MapMarkerData(
+          point: GeoPoint(longitude: 0, latitude: 0),
+          clusterGroup: MarkerGroups.garbage,
+        ),
+      ];
+      final clusters = clusterMarkers(markers, zoom: 14);
+      expect(clusters, hasLength(2));
+      final byGroup = {for (final c in clusters) c.group: c.memberIndices};
+      expect(byGroup[null], [0, 1]);
+      expect(byGroup[MarkerGroups.garbage], [2]);
+    });
   });
 
   group('GarbageMapView clustering and viewport', () {
@@ -265,6 +302,36 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(ClusterBadge), findsOneWidget);
       expect(find.text('3'), findsOneWidget);
+      expect(find.byType(MapPin), findsNothing);
+    });
+
+    testWidgets('each cluster group gets its own badge', (tester) async {
+      final point = GeoPoint(longitude: 3.37, latitude: 6.45);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: Scaffold(
+            body: GarbageMapView(
+              markers: [
+                MapMarkerData(point: point, clusterGroup: MarkerGroups.garbage),
+                MapMarkerData(point: point, clusterGroup: MarkerGroups.garbage),
+                MapMarkerData(point: point, clusterGroup: MarkerGroups.depot),
+                MapMarkerData(point: point, clusterGroup: MarkerGroups.depot),
+              ],
+              clustered: true,
+              tileProvider: _StubTileProvider(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(ClusterBadge), findsNWidgets(2));
+      expect(find.byTooltip('2 posts'), findsOneWidget);
+      expect(find.byTooltip('2 depots'), findsOneWidget);
+      final badges = tester
+          .widgetList<ClusterBadge>(find.byType(ClusterBadge))
+          .toList();
+      expect(badges[0].color, isNot(badges[1].color));
       expect(find.byType(MapPin), findsNothing);
     });
 

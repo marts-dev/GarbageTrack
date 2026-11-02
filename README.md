@@ -103,8 +103,8 @@ Trucks:
   `availability`, `limit`)
 - `GET /api/v1/trucks/{truck_id}` — read one truck
 - `PATCH /api/v1/trucks/{truck_id}` — edit plate, capacity, garbage types,
-  status, or `operator_id` (logistics/admin; `operator_id: null` unassigns;
-  one collector bound to at most one truck)
+  status, `current_location`, or `operator_id` (logistics/admin;
+  `operator_id: null` unassigns; one collector bound to at most one truck)
 - `DELETE /api/v1/trucks/{truck_id}` — remove a truck (logistics/admin;
   refused with 409 while it has an assigned planned route)
 
@@ -119,6 +119,8 @@ Collector API:
   assigned to you; logistics/admin bypass)
 - `PATCH /api/v1/trucks/{truck_id}/availability` — set `available`, `working`,
   or `full` (returning to `available` resets the load; same 403 rule)
+- `POST /api/v1/trucks/{truck_id}/location` — share the truck's GPS
+  `{longitude, latitude, accuracy_m}` (same 403 rule)
 
 AI (placeholder):
 

@@ -4,6 +4,26 @@ import 'package:geolocator/geolocator.dart';
 import '../models/models.dart';
 import 'type_dots.dart';
 
+/// One-shot GPS fix with the standard permission flow.
+///
+/// Throws a [StateError] with a human-readable message when permission is
+/// denied or the fix fails; callers surface it with [showError].
+Future<Position> requestCurrentPosition() async {
+  var permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+  }
+  if (permission == LocationPermission.denied ||
+      permission == LocationPermission.deniedForever) {
+    throw StateError('Location permission denied');
+  }
+  try {
+    return await Geolocator.getCurrentPosition();
+  } catch (e) {
+    throw StateError('GPS failed: $e');
+  }
+}
+
 /// GPS button plus manual longitude/latitude fields. Reports a valid point
 /// through [onChanged] whenever either source produces one.
 class LocationInput extends StatefulWidget {

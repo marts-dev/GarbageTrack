@@ -7,6 +7,16 @@ import 'package:latlong2/latlong.dart';
 import '../models/models.dart';
 import '../utils/geo.dart';
 
+/// Well-known [MapMarkerData.clusterGroup] buckets. Only markers sharing a
+/// bucket merge into one count badge, so garbage, depots, and trucks each
+/// keep their own clusters on a shared map.
+abstract class MarkerGroups {
+  static const garbage = 'garbage';
+  static const depot = 'depot';
+  static const truck = 'truck';
+  static const collectionPoint = 'collectionPoint';
+}
+
 /// One pin on a [GarbageMapView].
 class MapMarkerData {
   const MapMarkerData({
@@ -14,18 +24,28 @@ class MapMarkerData {
     this.icon = Icons.location_on,
     this.color,
     this.label,
+    this.clusterGroup,
   });
 
   final GeoPoint point;
   final IconData icon;
   final Color? color;
   final String? label;
+
+  /// Clustering bucket: pins only merge with pins in the same bucket.
+  /// Null (the default) clusters with other ungrouped pins, preserving the
+  /// legacy single-cluster behavior.
+  final String? clusterGroup;
 }
 
 /// One rendered pin group: either a single marker or a cluster of markers
 /// whose pins would overlap at the current zoom.
 class MarkerCluster {
-  const MarkerCluster({required this.memberIndices, required this.center});
+  const MarkerCluster({
+    required this.memberIndices,
+    required this.center,
+    this.group,
+  });
 
   /// Indices into the [GarbageMapView.markers] list.
   final List<int> memberIndices;
@@ -33,11 +53,15 @@ class MarkerCluster {
   /// Average position of the members.
   final LatLng center;
 
+  /// Shared [MapMarkerData.clusterGroup] of the members.
+  final String? group;
+
   bool get isSingle => memberIndices.length == 1;
 }
 
 /// Groups marker indices whose pins fall within [radiusPx] screen pixels of
-/// each other at [zoom], using web-mercator projection. Pure function so it
+/// each other at [zoom], using web-mercator projection. Markers only merge
+/// within their [MapMarkerData.clusterGroup] bucket. Pure function so it
 /// can be unit tested without a map.
 List<MarkerCluster> clusterMarkers(
   List<MapMarkerData> markers, {
@@ -46,30 +70,37 @@ List<MarkerCluster> clusterMarkers(
 }) {
   final points = [for (final m in markers) m.point.latLng];
   final projected = [for (final p in points) _project(p, zoom)];
-  final unassigned = [for (var i = 0; i < markers.length; i++) i];
+  final byGroup = <String?, List<int>>{};
+  for (var i = 0; i < markers.length; i++) {
+    byGroup.putIfAbsent(markers[i].clusterGroup, () => []).add(i);
+  }
   final clusters = <MarkerCluster>[];
-  while (unassigned.isNotEmpty) {
-    final seed = unassigned.removeAt(0);
-    final members = [seed];
-    unassigned.removeWhere((i) {
-      final dx = projected[i].x - projected[seed].x;
-      final dy = projected[i].y - projected[seed].y;
-      if (dx * dx + dy * dy <= radiusPx * radiusPx) {
-        members.add(i);
-        return true;
+  for (final entry in byGroup.entries) {
+    final unassigned = List.of(entry.value);
+    while (unassigned.isNotEmpty) {
+      final seed = unassigned.removeAt(0);
+      final members = [seed];
+      unassigned.removeWhere((i) {
+        final dx = projected[i].x - projected[seed].x;
+        final dy = projected[i].y - projected[seed].y;
+        if (dx * dx + dy * dy <= radiusPx * radiusPx) {
+          members.add(i);
+          return true;
+        }
+        return false;
+      });
+      var lat = 0.0;
+      var lng = 0.0;
+      for (final i in members) {
+        lat += points[i].latitude;
+        lng += points[i].longitude;
       }
-      return false;
-    });
-    var lat = 0.0;
-    var lng = 0.0;
-    for (final i in members) {
-      lat += points[i].latitude;
-      lng += points[i].longitude;
+      clusters.add(MarkerCluster(
+        memberIndices: members,
+        center: LatLng(lat / members.length, lng / members.length),
+        group: entry.key,
+      ));
     }
-    clusters.add(MarkerCluster(
-      memberIndices: members,
-      center: LatLng(lat / members.length, lng / members.length),
-    ));
   }
   return clusters;
 }
@@ -80,6 +111,29 @@ math.Point<double> _project(LatLng ll, double zoom) {
   final sinLat = math.sin(ll.latitude * math.pi / 180.0).clamp(-0.9999, 0.9999);
   final y = (0.5 - math.log((1 + sinLat) / (1 - sinLat)) / (4 * math.pi)) * scale;
   return math.Point(x, y);
+}
+
+/// Badge fill per cluster bucket, matching the bucket's pin color so a badge
+/// reads as its category at a glance.
+Color _badgeColor(ColorScheme scheme, String? group) => switch (group) {
+      MarkerGroups.depot => scheme.secondary,
+      MarkerGroups.truck => Colors.blue,
+      MarkerGroups.collectionPoint => scheme.tertiary,
+      _ => scheme.primary,
+    };
+
+/// Badge tooltip per cluster bucket. Badges only render for two or more
+/// members, so nouns stay plural.
+String _badgeTooltip(String? group, int count) {
+  final noun = switch (group) {
+    MarkerGroups.garbage => 'posts',
+    MarkerGroups.depot => 'depots',
+    MarkerGroups.truck => 'trucks',
+    MarkerGroups.collectionPoint => 'collection points',
+    null => 'reports',
+    _ => 'markers',
+  };
+  return '$count $noun';
 }
 
 /// Read-only OpenStreetMap view with markers, optional route polylines,
@@ -211,7 +265,11 @@ class _GarbageMapViewState extends State<GarbageMapView> {
         ? clusterMarkers(widget.markers, zoom: _zoom ?? widget.initialZoom)
         : [
             for (var i = 0; i < widget.markers.length; i++)
-              MarkerCluster(memberIndices: [i], center: points[i]),
+              MarkerCluster(
+                memberIndices: [i],
+                center: points[i],
+                group: widget.markers[i].clusterGroup,
+              ),
           ];
 
     return ClipRRect(
@@ -290,10 +348,11 @@ class _GarbageMapViewState extends State<GarbageMapView> {
                       child: _Tappable(
                         onTap: () => _zoomInto(cluster.center),
                         child: Tooltip(
-                          message: '${cluster.memberIndices.length} reports',
+                          message: _badgeTooltip(
+                              cluster.group, cluster.memberIndices.length),
                           child: ClusterBadge(
                             count: cluster.memberIndices.length,
-                            color: scheme.primary,
+                            color: _badgeColor(scheme, cluster.group),
                           ),
                         ),
                       ),

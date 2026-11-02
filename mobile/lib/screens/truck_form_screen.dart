@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/country_viewports.dart';
 import '../widgets/async_view.dart';
 import '../widgets/inputs.dart';
+import '../widgets/location_picker.dart';
 
 /// Create/edit form for trucks (logistics/admin), mirroring the facility
 /// form. Operator binding is 1:1: picking a collector already assigned to
 /// another truck fails with the server's 409 detail.
 class TruckFormScreen extends StatefulWidget {
-  const TruckFormScreen({super.key, this.existing});
+  const TruckFormScreen({super.key, this.existing, this.tileProvider});
 
   final Truck? existing;
+
+  /// Overrides tile loading (e.g. an offline stub in widget tests).
+  final TileProvider? tileProvider;
 
   @override
   State<TruckFormScreen> createState() => _TruckFormScreenState();
@@ -25,6 +31,7 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
   late String _status;
   final _types = <String>{};
   String? _operatorId;
+  GeoPoint? _location;
   bool _busy = false;
   late Future<List<User>> _collectors;
 
@@ -41,6 +48,7 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
     if (existing != null) {
       _types.addAll(existing.garbageTypes);
       _operatorId = existing.operatorId;
+      _location = existing.currentLocation;
     }
     _collectors = context.read<AuthProvider>().auth.listUsers(role: 'collector');
   }
@@ -85,6 +93,8 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
           garbageTypes: _types.toList(),
           status: _status,
           capacity: capacity,
+          longitude: _location?.longitude,
+          latitude: _location?.latitude,
         );
         // The create endpoint takes no operator; bind one right after when
         // the picker selected a collector.
@@ -105,6 +115,8 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
           operatorId: _operatorId,
           // Always send so clearing the picker unassigns (explicit null).
           operatorIdSet: true,
+          longitude: _location?.longitude,
+          latitude: _location?.latitude,
         );
       }
       if (mounted) {
@@ -121,6 +133,8 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
   @override
   Widget build(BuildContext context) {
     final editing = widget.existing != null;
+    final viewport =
+        viewportFor(context.watch<AuthProvider>().country);
     return Scaffold(
       appBar: AppBar(title: Text(editing ? 'Edit truck' : 'New truck')),
       body: Form(
@@ -185,6 +199,29 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
                       onChanged: (next) => setState(() => _types
                         ..clear()
                         ..addAll(next)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Location (optional)',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    LocationMapPicker(
+                      initial: _location,
+                      tileProvider: widget.tileProvider,
+                      fallbackCenter: viewport.center,
+                      fallbackZoom: viewport.zoom,
+                      onChanged: (point) =>
+                          setState(() => _location = point),
                     ),
                   ],
                 ),

@@ -271,3 +271,62 @@ def test_binding_unknown_truck_404(client, dispatcher, collector):
         ).status_code
         == 404
     )
+
+
+def _ping(client, truck_id, headers, lon=3.38, lat=6.46):
+    return client.post(
+        f"/api/v1/trucks/{truck_id}/location",
+        json={"longitude": lon, "latitude": lat},
+        headers=headers,
+    )
+
+
+def test_collector_pings_own_truck(client, dispatcher, collector):
+    truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    response = _ping(client, truck["id"], collector["headers"])
+    assert response.status_code == 200, response.text
+    assert response.json()["current_location"]["coordinates"] == [3.38, 6.46]
+
+
+def test_collector_ping_other_or_unassigned_truck_403(client, dispatcher, collector, collector2):
+    truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector2["id"], dispatcher["headers"])
+    forbidden = _ping(client, truck["id"], collector["headers"])
+    assert forbidden.status_code == 403
+
+    free = _make_truck(client, dispatcher["headers"], plate_number="OP-FREE")
+    assert _ping(client, free["id"], collector["headers"]).status_code == 403
+
+
+def test_logistics_pings_any_truck(client, dispatcher, collector):
+    truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    response = _ping(client, truck["id"], dispatcher["headers"], lon=1.0, lat=2.0)
+    assert response.status_code == 200, response.text
+    assert response.json()["current_location"]["coordinates"] == [1.0, 2.0]
+
+
+def test_ping_unknown_truck_404_and_bad_coords_422(client, dispatcher):
+    assert (
+        _ping(client, "000000000000000000000000", dispatcher["headers"]).status_code == 404
+    )
+    truck = _make_truck(client, dispatcher["headers"])
+    bad = client.post(
+        f"/api/v1/trucks/{truck['id']}/location",
+        json={"longitude": 999, "latitude": 6.46},
+        headers=dispatcher["headers"],
+    )
+    assert bad.status_code == 422
+
+
+def test_patch_updates_location_as_geojson(client, dispatcher):
+    truck = _make_truck(client, dispatcher["headers"])
+    response = client.patch(
+        f"/api/v1/trucks/{truck['id']}",
+        json={"current_location": {"longitude": 9.0, "latitude": 8.0}},
+        headers=dispatcher["headers"],
+    )
+    assert response.status_code == 200, response.text
+    location = response.json()["current_location"]
+    assert location == {"type": "Point", "coordinates": [9.0, 8.0]}

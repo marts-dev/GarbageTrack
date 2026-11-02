@@ -566,6 +566,7 @@ class _PostsMapState extends State<_PostsMap> {
                               post.types.first, scheme.brightness),
                   label:
                       '${post.types.map(pretty).join(', ')} · ${post.district ?? 'No district'}',
+                  clusterGroup: MarkerGroups.garbage,
                 ),
               for (final point in widget.collectionPoints)
                 MapMarkerData(
@@ -573,6 +574,7 @@ class _PostsMapState extends State<_PostsMap> {
                   icon: Icons.flag,
                   color: scheme.tertiary,
                   label: 'Collection point',
+                  clusterGroup: MarkerGroups.collectionPoint,
                 ),
               if (truckStart != null)
                 MapMarkerData(
@@ -580,6 +582,7 @@ class _PostsMapState extends State<_PostsMap> {
                   icon: Icons.local_shipping,
                   color: scheme.primary,
                   label: 'Start: truck position',
+                  clusterGroup: MarkerGroups.truck,
                 ),
               if (endDepot != null)
                 MapMarkerData(
@@ -587,6 +590,7 @@ class _PostsMapState extends State<_PostsMap> {
                   icon: Icons.home_work,
                   color: scheme.secondary,
                   label: 'End: ${endDepot.name}',
+                  clusterGroup: MarkerGroups.depot,
                 ),
             ],
             overlayMarkers: [

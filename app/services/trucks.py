@@ -17,6 +17,7 @@ from app.schemas.trucks import (
     CollectVicinityRequest,
     CollectVicinityResponse,
     RouteStop,
+    TruckLocation,
     TruckResponse,
     TruckScheduleCreate,
     TruckUpdate,
@@ -211,6 +212,11 @@ async def update_truck(
         async for other in db[truck_model.COLLECTION].find({"operator_id": operator_id}):
             if str(other["_id"]) != str(truck_doc["_id"]):
                 raise TruckOperatorConflictError("collector already assigned to another truck")
+    if "current_location" in changes and changes["current_location"] is not None:
+        loc = changes["current_location"]
+        changes["current_location"] = geo_point(
+            loc["longitude"], loc["latitude"]
+        ).model_dump(mode="json")
     if not changes:
         raise EmptyUpdateError("no fields to update")
     stored = await db[truck_model.COLLECTION].find_one_and_update(
@@ -359,6 +365,22 @@ async def collect_vicinity(
         capacity=capacity,
         availability=availability,
     )
+
+
+async def update_truck_location(
+    db: AsyncDatabase,
+    truck_id: str,
+    payload: TruckLocation,
+    user: object | None = None,
+) -> TruckResponse:
+    truck_doc = await _get_truck_doc(db, truck_id)
+    _require_operator_binding(truck_doc, user)
+    location = geo_point(payload.longitude, payload.latitude).model_dump(mode="json")
+    await db[truck_model.COLLECTION].update_one(
+        {"_id": truck_doc["_id"]}, {"$set": {"current_location": location}}
+    )
+    truck_doc.update({"current_location": location})
+    return _to_response(truck_doc)
 
 
 async def set_availability(

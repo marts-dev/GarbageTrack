@@ -56,9 +56,10 @@ dart run tool/live_check.dart      # expects the API at 127.0.0.1:8000
   in-memory fallback)
 - `lib/screens/` — login/register, per-role landings (resident home with
   location, reports, enroute trucks, classifier; collector with assigned truck,
-  routes, vicinity collect, status; logistics with overview, trucks CRUD
-  (list, create/edit with operator assignment, delete), facilities CRUD,
-  route assignment and deletion), admin tabbed overview
+  routes, vicinity collect, status, GPS location share; logistics with
+  overview, trucks CRUD (list, create/edit with operator assignment and a
+  map location picker, delete), facilities CRUD, route assignment and
+  deletion), admin tabbed overview
 - `lib/theme/` — centralized light/dark Material 3 theme (green seed)
 - `lib/widgets/geo_map.dart` — reusable OpenStreetMap view
   (`GarbageMapView`: markers, route polylines, filled polygons, OSM
