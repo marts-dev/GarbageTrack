@@ -168,6 +168,62 @@ def test_collect_vicinity_defaults_to_30m_radius():
     assert CollectVicinityRequest().radius_meters == 30
 
 
+def test_collect_candidates_previews_without_collecting(
+    client, dispatcher, collector, make_user
+):
+    resident = make_user()
+    truck = _make_truck(client, dispatcher["headers"], capacity=5)
+    p1 = _make_post(client, resident, types=["plastic"])
+    _make_post(client, resident, types=["glass"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+
+    response = client.get(
+        f"/api/v1/trucks/{truck['id']}/collect-candidates",
+        headers=collector["headers"],
+    )
+    assert response.status_code == 200, response.text
+    assert [p["id"] for p in response.json()] == [p1["id"]]
+
+    # Nothing was written: the post is still posted and the load untouched.
+    assert (
+        client.get(f"/api/v1/garbage/{p1['id']}", headers=resident["headers"]).json()["status"]
+        == "posted"
+    )
+    assert (
+        client.get(f"/api/v1/trucks/{truck['id']}", headers=collector["headers"]).json()["load"]
+        == 0
+    )
+
+
+def test_collect_candidates_matches_collect_guard(client, dispatcher, collector, make_user):
+    other = make_user("collector")
+    resident = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    _make_post(client, resident)
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+
+    assert (
+        client.get(
+            f"/api/v1/trucks/{truck['id']}/collect-candidates", headers=other["headers"]
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            f"/api/v1/trucks/{truck['id']}/collect-candidates",
+            headers=dispatcher["headers"],
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(
+            "/api/v1/trucks/000000000000000000000000/collect-candidates",
+            headers=collector["headers"],
+        ).status_code
+        == 404
+    )
+
+
 def test_collect_vicinity_needs_location_and_truck(client, dispatcher, collector):
     truck = _make_truck(client, dispatcher["headers"], current_location=None)
     _assign(client, truck["id"], collector["id"], dispatcher["headers"])

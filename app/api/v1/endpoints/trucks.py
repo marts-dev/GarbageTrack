@@ -7,6 +7,7 @@ from app.models.auth import Role
 from app.models.garbage import GarbageType
 from app.models.truck import TruckAvailability, TruckStatus
 from app.schemas.auth import UserResponse
+from app.schemas.garbage import GarbagePostResponse
 from app.schemas.trucks import (
     AvailabilityUpdate,
     CollectionRouteResponse,
@@ -146,6 +147,29 @@ async def read_truck_planned_route(truck_id: str, user: Collector, db: Db):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="no planned route for this truck"
         ) from None
+
+
+@router.get("/{truck_id}/collect-candidates", response_model=list[GarbagePostResponse])
+async def read_collect_candidates(
+    truck_id: str,
+    user: Collector,
+    db: Db,
+    longitude: Longitude = None,
+    latitude: Latitude = None,
+    radius_meters: Annotated[float, Query(gt=0)] = 30,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    types: Annotated[list[GarbageType] | None, Query()] = None,
+):
+    try:
+        return await trucks_service.find_collect_candidates(
+            db, truck_id, longitude, latitude, radius_meters, limit, types, user
+        )
+    except TruckNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
+    except TruckNotAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from None
+    except TruckLocationUnknownError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
 
 @router.post("/{truck_id}/collect-vicinity", response_model=CollectVicinityResponse)

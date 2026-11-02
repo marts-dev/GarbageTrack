@@ -538,6 +538,10 @@ class _AssignedRouteHeader extends StatelessWidget {
   }
 }
 
+/// Whole radii without decimals ("30 m", not "30.0 m").
+String _radiusText(double radius) =>
+    radius == radius.roundToDouble() ? '${radius.toInt()}' : '$radius';
+
 class _CollectTab extends StatefulWidget {
   const _CollectTab(
       {required this.truck,
@@ -567,10 +571,21 @@ class _CollectTabState extends State<_CollectTab> {
   bool _busy = false;
   CollectResult? _result;
 
+  /// Last preview and the radius it was computed for. Cleared whenever the
+  /// position or radius changes so it never describes stale inputs.
+  List<GarbagePost>? _preview;
+  double? _previewRadius;
+  bool _previewBusy = false;
+
   @override
   void initState() {
     super.initState();
+    _radius.addListener(_clearPreview);
     _prefillGps();
+  }
+
+  void _clearPreview() {
+    if (_preview != null) setState(() => _preview = null);
   }
 
   /// Starts the position at the collector's live fix, which is fresher than
@@ -595,6 +610,36 @@ class _CollectTabState extends State<_CollectTab> {
     super.dispose();
   }
 
+  Future<void> _previewCandidates() async {
+    final radius = double.tryParse(_radius.text.trim());
+    if (radius == null || radius <= 0) {
+      showError(context, 'Enter a valid radius in meters');
+      return;
+    }
+    setState(() {
+      _previewBusy = true;
+      _preview = null;
+    });
+    try {
+      final posts = await context.read<AuthProvider>().trucks.previewCollect(
+            widget.truck.id,
+            longitude: _point?.longitude,
+            latitude: _point?.latitude,
+            radiusMeters: radius,
+          );
+      if (mounted) {
+        setState(() {
+          _preview = posts;
+          _previewRadius = radius;
+        });
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _previewBusy = false);
+    }
+  }
+
   Future<void> _collect() async {
     final radius = double.tryParse(_radius.text.trim());
     if (radius == null || radius <= 0) {
@@ -613,7 +658,10 @@ class _CollectTabState extends State<_CollectTab> {
                 radiusMeters: radius,
               );
       if (mounted) {
-        setState(() => _result = result);
+        setState(() {
+          _result = result;
+          _preview = null;
+        });
         widget.onChanged();
       }
     } catch (e) {
@@ -662,7 +710,10 @@ class _CollectTabState extends State<_CollectTab> {
         ),
         const SizedBox(height: 8),
         LocationMapPicker(
-          onChanged: (point) => setState(() => _point = point),
+          onChanged: (point) => setState(() {
+            _point = point;
+            _preview = null;
+          }),
           initial: _point,
           fallbackCenter: viewport.center,
           fallbackZoom: viewport.zoom,
@@ -676,6 +727,30 @@ class _CollectTabState extends State<_CollectTab> {
             labelText: 'Radius (meters)',
           ),
         ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: (_busy || _previewBusy || widget.assignedGuarded)
+              ? null
+              : _previewCandidates,
+          icon: _previewBusy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.search),
+          label: const Text('Preview nearby'),
+        ),
+        if (_preview != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _preview!.isEmpty
+                ? 'No posts within ${_radiusText(_previewRadius!)} m of this position.'
+                : '${_preview!.length} ${_preview!.length == 1 ? 'post' : 'posts'} within ${_radiusText(_previewRadius!)} m:',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          for (final post in _preview!) PostCard(post: post),
+        ],
         const SizedBox(height: 12),
         FilledButton(
           onPressed: (_busy || widget.assignedGuarded) ? null : _collect,

@@ -81,6 +81,34 @@ class TruckApi {
     return CollectionRoute.fromJson(body as Map<String, dynamic>);
   }
 
+  /// Posts [collectVicinity] would collect: same origin, radius, and types,
+  /// without writing anything.
+  Future<List<GarbagePost>> previewCollect(
+    String truckId, {
+    double? longitude,
+    double? latitude,
+    double radiusMeters = 30,
+    List<String>? types,
+    int limit = 50,
+  }) async {
+    final query = <String, String>{
+      'radius_meters': '$radiusMeters',
+      'limit': '$limit',
+    };
+    if (longitude != null && latitude != null) {
+      query['longitude'] = '$longitude';
+      query['latitude'] = '$latitude';
+    }
+    final body = await _client.get(
+      '/trucks/$truckId/collect-candidates',
+      query: query,
+      queryAll: types == null || types.isEmpty ? null : {'types': types},
+    );
+    return (body as List)
+        .map((e) => GarbagePost.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<CollectResult> collectVicinity(
     String truckId, {
     double? longitude,

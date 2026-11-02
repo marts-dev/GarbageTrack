@@ -14,6 +14,7 @@ from app.models.garbage import GarbageStatus
 from app.models.geo import GeoLineString, GeoPoint, geo_point
 from app.models.route import PlannedRouteStatus
 from app.models.truck import TruckAvailability, TruckStatus
+from app.schemas.garbage import GarbagePostResponse
 from app.schemas.logistics import FacilityResponse, PlannedStopResponse
 from app.schemas.trucks import (
     CollectionRouteResponse,
@@ -404,6 +405,64 @@ async def get_truck_planned_route(db: AsyncDatabase, truck_id: str) -> TruckPlan
     )
 
 
+def _vicinity_query(origin: GeoPoint, radius_meters: float, wanted_types: list[str]) -> dict:
+    """Posts collectable around [origin]: posted/scheduled, matching types."""
+    return {
+        "location": {
+            "$geoWithin": {
+                "$centerSphere": [
+                    [origin.longitude, origin.latitude],
+                    radius_meters / EARTH_RADIUS_METERS,
+                ]
+            }
+        },
+        "status": {"$in": [GarbageStatus.POSTED.value, GarbageStatus.SCHEDULED.value]},
+        "types": {"$in": wanted_types},
+    }
+
+
+def _to_post_response(doc: dict) -> GarbagePostResponse:
+    return GarbagePostResponse(
+        id=str(doc["_id"]),
+        user_id=doc["user_id"],
+        location=doc["location"],
+        types=doc["types"],
+        description=doc.get("description"),
+        district=doc.get("district"),
+        country=doc.get("country"),
+        has_image=doc.get("image_base64") is not None,
+        image_content_type=doc.get("image_content_type"),
+        status=doc["status"],
+        created_at=doc["created_at"],
+        collected_at=doc.get("collected_at"),
+    )
+
+
+async def find_collect_candidates(
+    db: AsyncDatabase,
+    truck_id: str,
+    longitude: float | None = None,
+    latitude: float | None = None,
+    radius_meters: float = 30,
+    limit: int = 50,
+    types: list | None = None,
+    user: object | None = None,
+) -> list[GarbagePostResponse]:
+    """Preview of what [collect_vicinity] would collect: same origin, radius,
+    types, and operator guard, without writing anything."""
+    truck_doc = await _get_truck_doc(db, truck_id)
+    _require_operator_binding(truck_doc, user)
+    origin = resolve_origin(truck_doc, longitude, latitude)
+    wanted_types = _effective_types(truck_doc, types)
+    if not wanted_types:
+        return []
+    cursor = (
+        db[garbage_model.COLLECTION].find(_vicinity_query(origin, radius_meters, wanted_types))
+        .limit(limit)
+    )
+    return [_to_post_response(doc) async for doc in cursor]
+
+
 async def collect_vicinity(
     db: AsyncDatabase,
     truck_id: str,
@@ -417,19 +476,9 @@ async def collect_vicinity(
 
     post_ids: list[str] = []
     if wanted_types:
-        query = {
-            "location": {
-                "$geoWithin": {
-                    "$centerSphere": [
-                        [origin.longitude, origin.latitude],
-                        payload.radius_meters / EARTH_RADIUS_METERS,
-                    ]
-                }
-            },
-            "status": {"$in": [GarbageStatus.POSTED.value, GarbageStatus.SCHEDULED.value]},
-            "types": {"$in": wanted_types},
-        }
-        matches = db[garbage_model.COLLECTION].find(query)
+        matches = db[garbage_model.COLLECTION].find(
+            _vicinity_query(origin, payload.radius_meters, wanted_types)
+        )
         post_ids = [str(doc["_id"]) async for doc in matches]
         if post_ids:
             await db[garbage_model.COLLECTION].update_many(

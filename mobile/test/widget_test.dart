@@ -29,6 +29,16 @@ void main() {
     expect(find.text('At least 8 characters'), findsOneWidget);
   });
 
+  testWidgets('enter key submits the login form', (tester) async {
+    await pumpApp(tester);
+    await tester.enterText(find.byType(TextFormField).first, 'not-an-email');
+    await tester.showKeyboard(find.byType(TextFormField).last);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.text('Enter a valid email'), findsOneWidget);
+    expect(find.text('At least 8 characters'), findsOneWidget);
+  });
+
   User userWith(String role, [String? name]) => User(
         id: 'u1',
         email: 'u@example.com',

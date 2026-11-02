@@ -742,6 +742,16 @@ void main() {
               )),
               200);
           }
+          if (request.method == 'GET' &&
+              path == '/api/v1/trucks/t1/collect-candidates') {
+            return http.Response(
+              jsonEncode([
+                _postJson('p1', 3.38, 6.46, 'Ojota'),
+                _postJson('p2', 3.381, 6.461, 'Ikeja'),
+              ]),
+              200,
+            );
+          }
           if (request.method == 'PATCH' &&
               path == '/api/v1/trucks/t1/availability') {
             if (availabilityStatus != 200) {
@@ -1035,6 +1045,25 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Use truck location'), findsNothing);
+    });
+
+    testWidgets('preview shows nearby posts before collecting',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.text('Preview nearby'));
+      await tester.tap(find.text('Preview nearby'));
+      await tester.pumpAndSettle();
+      expect(find.text('2 posts within 30 m:'), findsOneWidget);
+      expect(find.textContaining('Ojota'), findsOneWidget);
+      await _scrollTo(tester, find.textContaining('Ikeja'));
+      expect(find.textContaining('Ikeja'), findsOneWidget);
+      expect(
+        calls,
+        contains('GET /api/v1/trucks/t1/collect-candidates'),
+      );
     });
 
     testWidgets('availability 403 surfaces the server detail', (tester) async {

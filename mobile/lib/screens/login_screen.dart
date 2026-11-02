@@ -41,6 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final busy = context.watch<AuthProvider>().isBusy;
+    final submit = busy ? null : _submit;
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('GarbageTrack')),
@@ -98,6 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   TextFormField(
                     controller: _email,
                     keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
                     autocorrect: false,
                     decoration: const InputDecoration(
                       labelText: 'Email',
@@ -105,21 +107,25 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     validator: (v) =>
                         v != null && v.contains('@') ? null : 'Enter a valid email',
+                    onFieldSubmitted: (_) =>
+                        FocusScope.of(context).nextFocus(),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _password,
                     obscureText: true,
+                    textInputAction: TextInputAction.done,
                     decoration: const InputDecoration(
                       labelText: 'Password',
                       prefixIcon: Icon(Icons.lock_outline),
                     ),
                     validator: (v) =>
                         v != null && v.length >= 8 ? null : 'At least 8 characters',
+                    onFieldSubmitted: (_) => submit?.call(),
                   ),
                   const SizedBox(height: 20),
                   FilledButton(
-                    onPressed: busy ? null : _submit,
+                    onPressed: submit,
                     child: busy
                         ? const SizedBox(
                             width: 18,

@@ -116,6 +116,8 @@ Collector API:
 - `GET /api/v1/trucks/{truck_id}/planned-route` — the truck's assigned
   planned route for the collector to follow (404 when none assigned);
   stops already collected are filtered out and depots are embedded
+- `GET /api/v1/trucks/{truck_id}/collect-candidates` — preview what a
+  collect would grab (same origin/radius/types guard, no writes)
 - `POST /api/v1/trucks/{truck_id}/collect-vicinity` — mark posted/scheduled
   garbage within `radius_meters` (default 30) as collected; bumps the
   truck's load and auto-marks it `full` at capacity (403 unless the truck is
