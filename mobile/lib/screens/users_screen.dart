@@ -56,6 +56,43 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
+  Future<void> _toggleActive(User target) async {
+    // Deactivation blocks login and releases trucks, so it gets a
+    // confirmation; reactivation applies immediately.
+    if (target.isActive) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Deactivate ${target.email}?'),
+          content: const Text(
+            'They will no longer be able to sign in, and any trucks they operate will be released.',
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Deactivate')),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    try {
+      await context
+          .read<AuthProvider>()
+          .auth
+          .updateActive(target.id, !target.isActive);
+      if (mounted) {
+        showOk(context, target.isActive ? 'User deactivated' : 'User activated');
+        setState(() => _reload++);
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -92,12 +129,32 @@ class _UsersScreenState extends State<UsersScreen> {
                       leading: CircleAvatar(child: Text(initial)),
                       title: Text(user.email),
                       subtitle: Text(
-                        '${user.displayName} · ${pretty(user.role)}',
+                        '${user.displayName} · ${pretty(user.role)}'
+                        '${user.isActive ? '' : ' · Inactive'}',
                       ),
-                      trailing: IconButton(
-                        tooltip: 'Edit role',
-                        icon: const Icon(Icons.edit_outlined),
-                        onPressed: () => _editRole(user),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: user.isActive
+                                ? 'Deactivate user'
+                                : 'Activate user',
+                            icon: Icon(
+                              user.isActive
+                                  ? Icons.person_off_outlined
+                                  : Icons.person_outline,
+                              color: user.isActive
+                                  ? null
+                                  : Theme.of(context).colorScheme.tertiary,
+                            ),
+                            onPressed: () => _toggleActive(user),
+                          ),
+                          IconButton(
+                            tooltip: 'Edit role',
+                            icon: const Icon(Icons.edit_outlined),
+                            onPressed: () => _editRole(user),
+                          ),
+                        ],
                       ),
                     ),
                   );

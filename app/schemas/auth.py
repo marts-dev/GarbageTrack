@@ -42,6 +42,10 @@ class RoleUpdateRequest(BaseModel):
     role: Role
 
 
+class ActiveUpdateRequest(BaseModel):
+    is_active: bool
+
+
 class ProfileUpdateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=100)
     country: CountryName | None = None

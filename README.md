@@ -59,7 +59,10 @@ curl -X POST localhost:8000/api/v1/auth/login \
 
 Set `ADMIN_EMAIL`/`ADMIN_PASSWORD` in `.env` to seed an ops admin on first
 boot (only when no users exist). Admins manage the user role via
-`PATCH /api/v1/auth/users/{id}/role`; `GET /api/v1/auth/users` is visible to
+`PATCH /api/v1/auth/users/{id}/role` and activation via
+`PATCH /api/v1/auth/users/{id}/active` (deactivation blocks login and
+releases operated trucks; it never deletes the user);
+`GET /api/v1/auth/users` is visible to
 logistics and admin with an optional `?role=` filter (used to pick a collector
 when assigning a truck operator); users edit their own display name with
 `PATCH /api/v1/auth/me`.

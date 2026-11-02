@@ -7,6 +7,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from app.core import security
 from app.core.config import settings
 from app.models import auth as auth_model
+from app.models import truck as truck_model
 from app.models.auth import Role, UserDocument
 from app.schemas.auth import UserResponse
 
@@ -105,6 +106,29 @@ async def update_user_role(db: AsyncDatabase, user_id: str, role: Role) -> UserR
         raise UserNotFoundError(user_id)
     stored["role"] = role
     stored.pop("roles", None)
+    return _to_response(stored)
+
+
+async def update_user_active(db: AsyncDatabase, user_id: str, active: bool) -> UserResponse:
+    """Soft-delete: deactivation blocks login; it never removes the user.
+
+    Deactivating also releases trucks the user operates so they stop
+    showing a stale assignment. Reactivating does not restore bindings.
+    """
+    try:
+        object_id = ObjectId(user_id)
+    except InvalidId as exc:
+        raise UserNotFoundError(user_id) from exc
+    stored = await db[auth_model.COLLECTION].find_one_and_update(
+        {"_id": object_id}, {"$set": {"is_active": active}}
+    )
+    if stored is None:
+        raise UserNotFoundError(user_id)
+    if not active:
+        await db[truck_model.COLLECTION].update_many(
+            {"operator_id": user_id}, {"$set": {"operator_id": None}}
+        )
+    stored["is_active"] = active
     return _to_response(stored)
 
 

@@ -115,6 +115,91 @@ def test_admin_can_list_and_promote_users(client, make_user):
     )
 
 
+def test_admin_can_deactivate_and_reactivate_user(client, make_user):
+    admin = make_user("admin")
+    _register(client, email="gone@example.com")
+    listed = client.get("/api/v1/auth/users", headers=admin["headers"]).json()
+    target_id = next(u["id"] for u in listed if u["email"] == "gone@example.com")
+
+    off = client.patch(
+        f"/api/v1/auth/users/{target_id}/active",
+        json={"is_active": False},
+        headers=admin["headers"],
+    )
+    assert off.status_code == 200, off.text
+    assert off.json()["is_active"] is False
+    assert _login(client, email="gone@example.com").status_code == 401
+
+    on = client.patch(
+        f"/api/v1/auth/users/{target_id}/active",
+        json={"is_active": True},
+        headers=admin["headers"],
+    )
+    assert on.status_code == 200, on.text
+    assert on.json()["is_active"] is True
+    assert _login(client, email="gone@example.com").status_code == 200
+
+
+def test_deactivate_releases_operated_trucks(client, make_user):
+    admin = make_user("admin")
+    collector = make_user("collector")
+    truck = client.post(
+        "/api/v1/trucks/schedules",
+        json={"plate_number": "AAA-1", "garbage_types": ["plastic"]},
+        headers=admin["headers"],
+    ).json()
+    assigned = client.patch(
+        f"/api/v1/trucks/{truck['id']}",
+        json={"operator_id": collector["id"]},
+        headers=admin["headers"],
+    )
+    assert assigned.status_code == 200, assigned.text
+    assert assigned.json()["operator_id"] == collector["id"]
+
+    off = client.patch(
+        f"/api/v1/auth/users/{collector['id']}/active",
+        json={"is_active": False},
+        headers=admin["headers"],
+    )
+    assert off.status_code == 200, off.text
+    assert (
+        client.get(f"/api/v1/trucks/{truck['id']}", headers=admin["headers"]).json()[
+            "operator_id"
+        ]
+        is None
+    )
+
+
+def test_active_route_guards(client, make_user):
+    admin = make_user("admin")
+    resident = make_user()
+    logistics = make_user("logistics")
+    assert (
+        client.patch(
+            "/api/v1/auth/users/000000000000000000000000/active",
+            json={"is_active": False},
+            headers=admin["headers"],
+        ).status_code
+        == 404
+    )
+    for headers in (resident["headers"], logistics["headers"]):
+        assert (
+            client.patch(
+                f"/api/v1/auth/users/{resident['id']}/active",
+                json={"is_active": False},
+                headers=headers,
+            ).status_code
+            == 403
+        )
+    assert (
+        client.patch(
+            f"/api/v1/auth/users/{resident['id']}/active",
+            json={"is_active": False},
+        ).status_code
+        == 401
+    )
+
+
 def test_user_admin_routes_forbidden_for_non_admin(client, make_user):
     resident = make_user()
     assert client.get("/api/v1/auth/users", headers=resident["headers"]).status_code == 403

@@ -7,6 +7,7 @@ from app.api.deps import CurrentUser, Db, require_roles
 from app.core import security
 from app.models.auth import Role
 from app.schemas.auth import (
+    ActiveUpdateRequest,
     ProfileUpdateRequest,
     RefreshRequest,
     RegisterRequest,
@@ -104,5 +105,14 @@ async def update_role(user_id: str, payload: RoleUpdateRequest, user: Admin, db:
     _ = user
     try:
         return await auth_service.update_user_role(db, user_id, payload.role)
+    except UserNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found") from None
+
+
+@router.patch("/users/{user_id}/active", response_model=UserResponse)
+async def update_active(user_id: str, payload: ActiveUpdateRequest, user: Admin, db: Db):
+    _ = user
+    try:
+        return await auth_service.update_user_active(db, user_id, payload.is_active)
     except UserNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found") from None

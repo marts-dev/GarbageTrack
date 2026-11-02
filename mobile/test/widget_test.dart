@@ -1,9 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:garbagetrack/api/api_client.dart';
 import 'package:garbagetrack/main.dart';
 import 'package:garbagetrack/models/models.dart';
 import 'package:garbagetrack/screens/home_screen.dart';
+import 'package:garbagetrack/screens/users_screen.dart';
 import 'package:garbagetrack/state/auth_provider.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
 
 /// Pumps the app past async plugin calls (secure storage), which need real
@@ -91,5 +97,61 @@ void main() {
     for (final label in ['Home', 'Collect', 'Logistics', 'Users']) {
       expect(find.text(label), findsOneWidget);
     }
+  });
+
+  testWidgets('admin can deactivate and reactivate a user', (tester) async {
+    var active = true;
+    final calls = <String>[];
+    Map<String, dynamic> userJson() => {
+          'id': 'u2',
+          'email': 'gone@example.com',
+          'full_name': 'Gone User',
+          'role': 'resident',
+          'country': null,
+          'is_active': active,
+          'created_at': '2026-10-29T00:00:00Z',
+        };
+    final auth = AuthProvider.withUser(
+      userWith('admin'),
+      client: ApiClient(
+        baseUrl: 'http://x',
+        httpClient: MockClient((request) async {
+          final path = request.url.path;
+          calls.add('${request.method} $path');
+          if (request.method == 'GET' && path == '/api/v1/auth/users') {
+            return http.Response(jsonEncode([userJson()]), 200);
+          }
+          if (request.method == 'PATCH' &&
+              path == '/api/v1/auth/users/u2/active') {
+            active =
+                (jsonDecode(request.body) as Map)['is_active'] as bool;
+            return http.Response(jsonEncode(userJson()), 200);
+          }
+          return http.Response(jsonEncode({'detail': 'not found'}), 404);
+        }),
+      ),
+    );
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: auth,
+        child: const MaterialApp(home: UsersScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('gone@example.com'), findsOneWidget);
+    expect(find.byTooltip('Deactivate user'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Deactivate user'));
+    await tester.pumpAndSettle();
+    expect(find.text('Deactivate gone@example.com?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Deactivate'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Inactive'), findsOneWidget);
+    expect(find.byTooltip('Activate user'), findsOneWidget);
+    expect(calls, contains('PATCH /api/v1/auth/users/u2/active'));
+
+    await tester.tap(find.byTooltip('Activate user'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Inactive'), findsNothing);
   });
 }

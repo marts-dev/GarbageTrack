@@ -59,4 +59,11 @@ class AuthApi {
     final body = await _client.patchJson('/auth/users/$userId/role', body: {'role': role});
     return User.fromJson(body as Map<String, dynamic>);
   }
+
+  /// Activates or deactivates a user (admin only). Deactivation blocks
+  /// login and releases operated trucks; it never deletes the user.
+  Future<User> updateActive(String userId, bool active) async {
+    final body = await _client.patchJson('/auth/users/$userId/active', body: {'is_active': active});
+    return User.fromJson(body as Map<String, dynamic>);
+  }
 }
