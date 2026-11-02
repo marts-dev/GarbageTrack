@@ -7,12 +7,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
+import '../api/api_client.dart';
 import '../models/models.dart';
 import '../state/auth_provider.dart';
-import '../utils/country_viewports.dart';
 import '../widgets/async_view.dart';
+import '../widgets/geo_map.dart';
 import '../widgets/inputs.dart';
-import '../widgets/location_picker.dart';
+import 'location_screen.dart';
 
 class NewPostScreen extends StatefulWidget {
   const NewPostScreen({super.key, this.tileProvider});
@@ -28,10 +29,41 @@ class _NewPostScreenState extends State<NewPostScreen> {
   final _description = TextEditingController();
   final _district = TextEditingController();
   final _types = <String>{};
-  GeoPoint? _point;
   Uint8List? _imageBytes;
   String? _imageMime;
   bool _busy = false;
+
+  /// Saved collection point the report is filed from. Null when the
+  /// resident never saved one (404); reloaded after returning from setup.
+  Future<UserLocation?>? _pointFuture;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Residents only: anyone else is guarded out of the form, and an
+    // unobserved future failing would fail the widget tree.
+    if (context.read<AuthProvider>().user?.isResident == true) {
+      _pointFuture ??= _loadPoint(context.read<AuthProvider>());
+    }
+  }
+
+  Future<UserLocation?> _loadPoint(AuthProvider auth) async {
+    try {
+      return await auth.users.getLocation(auth.user!.id);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
+  Future<void> _openSetup() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const LocationScreen()),
+    );
+    if (mounted) {
+      setState(() => _pointFuture = _loadPoint(context.read<AuthProvider>()));
+    }
+  }
 
   @override
   void dispose() {
@@ -58,8 +90,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
     }
   }
 
-  Future<void> _submit() async {
-    final point = _point;
+  Future<void> _submit(GeoPoint? point) async {
     if (point == null || _types.isEmpty) return;
     final auth = context.read<AuthProvider>();
     if (auth.user?.isResident != true) {
@@ -103,11 +134,32 @@ class _NewPostScreenState extends State<NewPostScreen> {
         ),
       );
     }
-    final viewport = viewportFor(auth.country);
-    final canSubmit = _point != null && _types.isNotEmpty && !_busy;
     return Scaffold(
       appBar: AppBar(title: const Text('Report garbage')),
-      body: ListView(
+      body: FutureBuilder(
+        future: _pointFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const LoadingView(label: 'Loading collection point…');
+          }
+          if (snapshot.hasError) {
+            final error = snapshot.error;
+            return ErrorView(
+              message: error is ApiException ? error.message : error.toString(),
+              onRetry: () => setState(
+                () => _pointFuture = _loadPoint(context.read<AuthProvider>()),
+              ),
+            );
+          }
+          return _form(context, auth, snapshot.data?.location);
+        },
+      ),
+    );
+  }
+
+  Widget _form(BuildContext context, AuthProvider auth, GeoPoint? point) {
+    final canSubmit = point != null && _types.isNotEmpty && !_busy;
+    return ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
@@ -117,14 +169,37 @@ class _NewPostScreenState extends State<NewPostScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Where is it?', style: Theme.of(context).textTheme.titleMedium),
+                  Text('Collection point',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  LocationMapPicker(
-                    onChanged: (point) => setState(() => _point = point),
-                    fallbackCenter: viewport.center,
-                    fallbackZoom: viewport.zoom,
-                    tileProvider: widget.tileProvider,
-                  ),
+                  if (point == null) ...[
+                    const Text(
+                      'No collection point yet. Reports are collected from the point you save.',
+                    ),
+                    const SizedBox(height: 8),
+                    FilledButton.tonal(
+                      onPressed: _openSetup,
+                      child: const Text('Set collection point'),
+                    ),
+                  ] else ...[
+                    Text(
+                      point.short,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    GarbageMapView(
+                      markers: [MapMarkerData(point: point)],
+                      height: 160,
+                      tileProvider: widget.tileProvider,
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: _openSetup,
+                        child: const Text('Change'),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -202,14 +277,13 @@ class _NewPostScreenState extends State<NewPostScreen> {
             ),
           const SizedBox(height: 16),
           FilledButton(
-            onPressed: canSubmit ? _submit : null,
+            onPressed: canSubmit ? () => _submit(point) : null,
             child: _busy
                 ? const SizedBox(
                     width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('Submit report'),
           ),
         ],
-      ),
-    );
+      );
   }
 }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../api/api_client.dart';
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import 'classify_screen.dart';
 import 'enroute_screen.dart';
@@ -22,6 +24,32 @@ class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
   /// Popping a route does not otherwise rebuild this screen, so without it
   /// the badge would keep its stale count after confirming pickups.
   int _badgeReload = 0;
+
+  /// Saved collection point check for the first-run gate. Hoisted so the
+  /// badge reload above never refetches it.
+  Future<UserLocation?>? _pointFuture;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Residents only: the gate below never subscribes for anyone else, and
+    // an unobserved future failing would fail the widget tree.
+    if (context.read<AuthProvider>().user?.isResident == true) {
+      _pointFuture ??= _loadPoint(context.read<AuthProvider>());
+    }
+  }
+
+  /// Null when the resident never saved a collection point (404). Any other
+  /// failure rethrows so the gate can fail open to the home screen instead
+  /// of stranding the user on setup while offline.
+  Future<UserLocation?> _loadPoint(AuthProvider auth) async {
+    try {
+      return await auth.users.getLocation(auth.user!.id);
+    } on ApiException catch (e) {
+      if (e.statusCode == 404) return null;
+      rethrow;
+    }
+  }
 
   Future<void> _editName(BuildContext context, User user) async {
     final controller = TextEditingController(text: user.fullName ?? '');
@@ -68,10 +96,40 @@ class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = context.watch<AuthProvider>().user;
+    final auth = context.watch<AuthProvider>();
+    // First-run gate, residents only: no saved collection point means the
+    // setup screen instead of the home entries.
+    if (auth.user?.isResident == true) {
+      return FutureBuilder(
+        future: _pointFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('GarbageTrack')),
+              body: const LoadingView(),
+            );
+          }
+          if (!snapshot.hasError && snapshot.data == null) {
+            return LocationScreen(
+              setupMode: true,
+              onSaved: () => setState(
+                () => _pointFuture = _loadPoint(context.read<AuthProvider>()),
+              ),
+            );
+          }
+          return _home(auth);
+        },
+      );
+    }
+    return _home(auth);
+  }
+
+  Widget _home(AuthProvider auth) {
+    final user = auth.user;
     final canReport = user?.isResident ?? false;
     final entries = [
-      (Icons.my_location_outlined, 'My location', 'Save your GPS position', const LocationScreen()),
+      (Icons.pin_drop_outlined, 'Collection point', 'Where collectors pick up your garbage',
+          const LocationScreen()),
       if (canReport)
         (Icons.add_a_photo_outlined, 'Report garbage', 'Post waste for collection',
             const NewPostScreen()),

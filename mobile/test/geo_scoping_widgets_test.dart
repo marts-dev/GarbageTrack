@@ -82,6 +82,15 @@ Map<String, dynamic> _postJson(String id, String? district, double lng, double l
       'collected_at': null,
     };
 
+Map<String, dynamic> _locationJson(double lng, double lat) => {
+      'user_id': 'u1',
+      'location': {
+        'type': 'Point',
+        'coordinates': [lng, lat]
+      },
+      'updated_at': '2026-10-29T00:00:00Z',
+    };
+
 Map<String, dynamic> _routeJson() => {
       'id': 'r1',
       'truck_id': 't1',
@@ -577,9 +586,34 @@ void main() {
       expect(find.text('Submit report'), findsNothing);
     });
 
+    MockClient locationBackend(Map<String, dynamic>? location, int status) =>
+        MockClient((request) async {
+          if (request.method == 'GET' &&
+              request.url.path == '/api/v1/users/u1/location') {
+            if (location == null) {
+              return http.Response(jsonEncode({'detail': 'not found'}), status);
+            }
+            return http.Response(jsonEncode(location), 200);
+          }
+          if (request.method == 'GET' && request.url.path == '/api/v1/garbage') {
+            return http.Response(jsonEncode([]), 200);
+          }
+          return http.Response(jsonEncode({'detail': 'not found'}), 404);
+        });
+
+    AuthProvider locationAuth(Map<String, dynamic>? location,
+            {int status = 404}) =>
+        AuthProvider.withUser(
+          _user('resident', country: 'Nigeria'),
+          client: ApiClient(
+            baseUrl: 'http://x',
+            httpClient: locationBackend(location, status),
+          ),
+        );
+
     testWidgets('new-post screen shows district field for residents',
         (tester) async {
-      final auth = AuthProvider.withUser(_user('resident', country: 'Nigeria'));
+      final auth = locationAuth(_locationJson(3.37, 6.45));
       await tester.pumpWidget(
           _withAuth(auth, NewPostScreen(tileProvider: _StubTileProvider())));
       await tester.pumpAndSettle();
@@ -587,8 +621,117 @@ void main() {
         find.widgetWithText(TextField, 'District / region (optional)'),
         findsOneWidget,
       );
+      // The confirmation map centers on the saved collection point.
       final map = tester.widget<FlutterMap>(find.byType(FlutterMap));
-      expect(map.options.initialCenter, const LatLng(9.08, 8.68));
+      expect(map.options.initialCenter, const LatLng(6.45, 3.37));
+    });
+
+    testWidgets('report submits the saved collection point', (tester) async {
+      Map<String, dynamic>? submitted;
+      final auth = AuthProvider.withUser(
+        _user('resident', country: 'Nigeria'),
+        client: ApiClient(
+          baseUrl: 'http://x',
+          httpClient: MockClient((request) async {
+            if (request.method == 'GET' &&
+                request.url.path == '/api/v1/users/u1/location') {
+              return http.Response(
+                  jsonEncode(_locationJson(3.37, 6.45)), 200);
+            }
+            if (request.method == 'POST' &&
+                request.url.path == '/api/v1/garbage') {
+              submitted =
+                  jsonDecode(request.body) as Map<String, dynamic>;
+              return http.Response(
+                  jsonEncode(_postJson('p9', null, 3.37, 6.45)), 201);
+            }
+            return http.Response(jsonEncode({'detail': 'not found'}), 404);
+          }),
+        ),
+      );
+      await tester.pumpWidget(
+          _withAuth(auth, NewPostScreen(tileProvider: _StubTileProvider())));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.widgetWithText(FilterChip, 'Plastic'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Plastic'));
+      await tester.pumpAndSettle();
+      await _scrollTo(
+          tester, find.widgetWithText(FilledButton, 'Submit report'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Submit report'));
+      await tester.pumpAndSettle();
+      expect(submitted?['longitude'], 3.37);
+      expect(submitted?['latitude'], 6.45);
+      expect(submitted?['types'], ['plastic']);
+    });
+
+    testWidgets('report without a collection point prompts setup',
+        (tester) async {
+      final auth = locationAuth(null);
+      await tester.pumpWidget(
+          _withAuth(auth, NewPostScreen(tileProvider: _StubTileProvider())));
+      await tester.pumpAndSettle();
+      expect(find.text('Set collection point'), findsOneWidget);
+      await _scrollTo(
+          tester, find.widgetWithText(FilledButton, 'Submit report'));
+      final submit = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Submit report'));
+      expect(submit.onPressed, isNull);
+    });
+  });
+
+  group('collection point gate', () {
+    MockClient gateBackend(
+            {Map<String, dynamic>? location, int status = 404}) =>
+        MockClient((request) async {
+          if (request.method == 'GET' &&
+              request.url.path == '/api/v1/users/u1/location') {
+            if (location == null) {
+              return http.Response(
+                  jsonEncode({'detail': 'not found'}), status);
+            }
+            return http.Response(jsonEncode(location), 200);
+          }
+          if (request.method == 'GET' && request.url.path == '/api/v1/garbage') {
+            return http.Response(jsonEncode([]), 200);
+          }
+          return http.Response(jsonEncode({'detail': 'not found'}), 404);
+        });
+
+    AuthProvider gateAuth(
+            {Map<String, dynamic>? location, int status = 404}) =>
+        AuthProvider.withUser(
+          _user('resident'),
+          client: ApiClient(
+            baseUrl: 'http://x',
+            httpClient: gateBackend(location: location, status: status),
+          ),
+        );
+
+    testWidgets('resident without a collection point sees setup first',
+        (tester) async {
+      await tester.pumpWidget(_withAuth(gateAuth(), const HomeScreen()));
+      await tester.pumpAndSettle();
+      expect(find.text('Set collection point'), findsOneWidget);
+      expect(
+          find.text('Where should collectors pick up your garbage?'),
+          findsOneWidget);
+      expect(find.text('Report garbage'), findsNothing);
+    });
+
+    testWidgets('resident with a collection point lands on home',
+        (tester) async {
+      await tester.pumpWidget(_withAuth(
+          gateAuth(location: _locationJson(3.37, 6.45)), const HomeScreen()));
+      await tester.pumpAndSettle();
+      expect(find.text('Report garbage'), findsOneWidget);
+      expect(find.text('Collection point'), findsOneWidget);
+    });
+
+    testWidgets('gate fails open when the check errors', (tester) async {
+      await tester.pumpWidget(
+          _withAuth(gateAuth(status: 500), const HomeScreen()));
+      await tester.pumpAndSettle();
+      expect(find.text('Report garbage'), findsOneWidget);
     });
   });
 
