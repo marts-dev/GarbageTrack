@@ -94,9 +94,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsOneWidget);
-    for (final label in ['Home', 'Collect', 'Logistics', 'Users']) {
+    for (final label in ['Home', 'Logistics', 'Users']) {
       expect(find.text(label), findsOneWidget);
     }
+    expect(find.text('Collect'), findsNothing);
   });
 
   testWidgets('admin can deactivate and reactivate a user', (tester) async {

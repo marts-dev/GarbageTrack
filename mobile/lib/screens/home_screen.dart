@@ -43,14 +43,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
       (
-        const CollectorHomeScreen(),
-        const NavigationDestination(
-          icon: Icon(Icons.local_shipping_outlined),
-          selectedIcon: Icon(Icons.local_shipping),
-          label: 'Collect',
-        ),
-      ),
-      (
         const LogisticsHomeScreen(),
         const NavigationDestination(
           icon: Icon(Icons.forklift),

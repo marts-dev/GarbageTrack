@@ -553,12 +553,12 @@ void main() {
       await tester.pumpWidget(_withAuth(authFor('admin'), const HomeScreen()));
       await tester.pumpAndSettle();
       expect(find.byType(NavigationBar), findsOneWidget);
-      for (final label in ['Home', 'Collect', 'Logistics', 'Users']) {
+      // No Collect tab: admins can never operate a truck, so it only ever
+      // showed the unassigned empty state.
+      for (final label in ['Home', 'Logistics', 'Users']) {
         expect(find.text(label), findsOneWidget);
       }
-      await tester.tap(find.text('Collect'));
-      await tester.pumpAndSettle();
-      expect(find.text('No truck assigned'), findsOneWidget);
+      expect(find.text('Collect'), findsNothing);
     });
   });
 
