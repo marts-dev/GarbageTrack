@@ -78,9 +78,45 @@ List<RegionBoundary> parseRegionBoundaries(String geojson) {
   return boundaries;
 }
 
+bool _pointInRing(LatLng point, List<LatLng> ring) {
+  var inside = false;
+  var j = ring.length - 1;
+  for (var i = 0; i < ring.length; i++) {
+    final xi = ring[i].longitude;
+    final yi = ring[i].latitude;
+    final xj = ring[j].longitude;
+    final yj = ring[j].latitude;
+    if ((yi > point.latitude) != (yj > point.latitude) &&
+        point.longitude <
+            (xj - xi) * (point.latitude - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+    j = i;
+  }
+  return inside;
+}
+
+/// Name of the region containing [point], or null when outside all of
+/// them. Holes are respected. Pure so taps resolve without depending on
+/// the layer hit notifier (which also fires on mouse hover).
+String? regionContaining(List<RegionBoundary> regions, LatLng point) {
+  for (final region in regions) {
+    for (final poly in region.polygons) {
+      if (!_pointInRing(point, poly.first)) continue;
+      if (poly.skip(1).any((hole) => _pointInRing(point, hole))) continue;
+      return region.name;
+    }
+  }
+  return null;
+}
+
 /// Choropleth of report counts per region. Tapping a region (or its count
 /// badge) reports its name through [onRegionTap].
-class RegionChoropleth extends StatefulWidget {
+///
+/// Taps resolve through [regionContaining] on [MapOptions.onTap], never the
+/// layer hit notifier: the notifier also fires on mouse hover, which would
+/// open the breakdown sheet just for moving the pointer across a region.
+class RegionChoropleth extends StatelessWidget {
   const RegionChoropleth({
     super.key,
     required this.regions,
@@ -103,41 +139,14 @@ class RegionChoropleth extends StatefulWidget {
   final MapController? mapController;
 
   @override
-  State<RegionChoropleth> createState() => _RegionChoroplethState();
-}
-
-class _RegionChoroplethState extends State<RegionChoropleth> {
-  final LayerHitNotifier<String> _hitNotifier = ValueNotifier(null);
-
-  @override
-  void initState() {
-    super.initState();
-    _hitNotifier.addListener(_onHit);
-  }
-
-  @override
-  void dispose() {
-    _hitNotifier
-      ..removeListener(_onHit)
-      ..dispose();
-    super.dispose();
-  }
-
-  void _onHit() {
-    final hit = _hitNotifier.value;
-    final name = hit?.hitValues.isNotEmpty == true ? hit!.hitValues.first : null;
-    if (name != null) widget.onRegionTap(name);
-  }
-
-  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final maxCount = widget.counts.values.fold<int>(0, (a, b) => a > b ? a : b);
+    final maxCount = counts.values.fold<int>(0, (a, b) => a > b ? a : b);
     var minLat = double.infinity;
     var maxLat = -double.infinity;
     var minLng = double.infinity;
     var maxLng = -double.infinity;
-    for (final region in widget.regions) {
+    for (final region in regions) {
       for (final poly in region.polygons) {
         for (final ring in poly) {
           for (final p in ring) {
@@ -160,11 +169,11 @@ class _RegionChoroplethState extends State<RegionChoropleth> {
                 ? 6.0
                 : 7.0;
     return SizedBox(
-      height: widget.height,
+      height: height,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: FlutterMap(
-          mapController: widget.mapController,
+          mapController: mapController,
           options: MapOptions(
             initialCenter:
                 LatLng((minLat + maxLat) / 2, (minLng + maxLng) / 2),
@@ -172,43 +181,49 @@ class _RegionChoroplethState extends State<RegionChoropleth> {
             interactionOptions: const InteractionOptions(
               flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
             ),
+            onTap: (_, ll) {
+              final name = regionContaining(regions, ll);
+              if (name != null) onRegionTap(name);
+            },
           ),
           children: [
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.garbagetrack.garbagetrack',
-              tileProvider: widget.tileProvider,
+              tileProvider: tileProvider,
             ),
             PolygonLayer(
-              hitNotifier: _hitNotifier,
               polygons: [
-                for (final region in widget.regions)
+                for (final region in regions)
                   for (final poly in region.polygons)
                     Polygon(
                       points: poly.first,
                       holePointsList: poly.skip(1).toList(),
                       color: scheme.primary.withValues(
                         alpha: _fillAlpha(
-                            widget.counts[region.name] ?? 0, maxCount),
+                            counts[region.name] ?? 0, maxCount),
                       ),
                       borderColor: scheme.primary,
                       borderStrokeWidth: 2,
+                      // Labels each polygon with its region (used by tests
+                      // to prove every region draws); selection resolves
+                      // through onTap, not the hit notifier.
                       hitValue: region.name,
                     ),
               ],
             ),
             MarkerLayer(
               markers: [
-                for (final region in widget.regions)
-                  if ((widget.counts[region.name] ?? 0) > 0)
+                for (final region in regions)
+                  if ((counts[region.name] ?? 0) > 0)
                     Marker(
                       point: region.centroid,
                       width: 36,
                       height: 36,
                       child: GestureDetector(
-                        onTap: () => widget.onRegionTap(region.name),
+                        onTap: () => onRegionTap(region.name),
                         child: _CountBadge(
-                            count: widget.counts[region.name]!),
+                            count: counts[region.name]!),
                       ),
                     ),
               ],

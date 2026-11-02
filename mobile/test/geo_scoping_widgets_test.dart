@@ -805,7 +805,7 @@ void main() {
       expect(find.byType(TypeDot), findsWidgets);
     });
 
-    testWidgets('type filter narrows the manual post list', (tester) async {
+    testWidgets('type chips narrow the manual post list', (tester) async {
       final mixedPosts = [
         _postJson('p1', 'Ojota', 3.37, 6.45, types: const ['plastic']),
         _postJson('p2', 'Ikeja', 3.40, 6.60, types: const ['organic']),
@@ -827,27 +827,61 @@ void main() {
       await _scrollTo(tester, find.byType(CheckboxListTile));
       expect(find.byType(CheckboxListTile), findsNWidgets(2));
 
-      await _scrollTo(
-          tester, find.byType(DropdownButtonFormField<String?>));
-      await tester.tap(find.byType(DropdownButtonFormField<String?>));
+      // Toggling Organic off hides the Ikeja post.
+      await _scrollTo(tester, find.widgetWithText(FilterChip, 'Organic'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Organic'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Plastic').last);
-      await tester.pumpAndSettle();
-
       await _scrollTo(tester, find.byType(CheckboxListTile));
       expect(find.byType(CheckboxListTile), findsOneWidget);
       expect(find.textContaining('Ojota'), findsWidgets);
       expect(find.textContaining('Ikeja'), findsNothing);
 
-      // Resetting to All types shows everything again.
-      await _scrollTo(
-          tester, find.byType(DropdownButtonFormField<String?>));
-      await tester.tap(find.byType(DropdownButtonFormField<String?>));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('All types').last);
+      // Toggling it back on shows everything again.
+      await _scrollTo(tester, find.widgetWithText(FilterChip, 'Organic'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Organic'));
       await tester.pumpAndSettle();
       await _scrollTo(tester, find.byType(CheckboxListTile));
       expect(find.byType(CheckboxListTile), findsNWidgets(2));
+    });
+
+    testWidgets('type chips follow the truck and submit the subset',
+        (tester) async {
+      final submitted = <String, dynamic>{};
+      final auth = AuthProvider.withUser(
+        _user('logistics', country: 'Nigeria'),
+        client: ApiClient(
+          baseUrl: 'http://x',
+          httpClient: _routeBackend(
+            posts: posts,
+            onRouteBody: () => submitted,
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      // Without a truck every type is offered.
+      expect(find.widgetWithText(FilterChip, 'Organic'), findsOneWidget);
+
+      await _selectTruck(tester);
+      // The mock truck carries plastic and paper only.
+      expect(find.text('Only types ABC-123 can carry.'), findsOneWidget);
+      expect(find.widgetWithText(FilterChip, 'Plastic'), findsOneWidget);
+      expect(find.widgetWithText(FilterChip, 'Paper'), findsOneWidget);
+      expect(find.widgetWithText(FilterChip, 'Organic'), findsNothing);
+
+      // Narrow to plastic-only for this run.
+      await _scrollTo(tester, find.widgetWithText(FilterChip, 'Paper'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Paper'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.text('North Depot (Dump Site)'));
+      await tester.tap(find.text('North Depot (Dump Site)'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.text('Assign route'));
+      await tester.tap(find.text('Assign route'));
+      await tester.pumpAndSettle();
+      expect(submitted['types'], ['plastic']);
     });
 
     testWidgets('posted garbage renders marker-clustered', (tester) async {

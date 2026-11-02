@@ -59,6 +59,12 @@ class PostsAlreadyCollectedError(Exception):
         self.collected = collected
 
 
+class PostsIncompatibleWithTruckError(Exception):
+    def __init__(self, incompatible: list[str]):
+        super().__init__(f"posts incompatible with truck: {incompatible}")
+        self.incompatible = incompatible
+
+
 class DepotsNotFoundError(Exception):
     def __init__(self, missing: list[str]):
         super().__init__(f"depots not found: {missing}")
@@ -340,6 +346,14 @@ async def create_planned_route(db: AsyncDatabase, payload: PlannedRouteCreate) -
         ]
         if collected:
             raise PostsAlreadyCollectedError(collected)
+        truck_types = {str(t) for t in truck_doc.get("garbage_types", [])}
+        incompatible = [
+            str(doc["_id"])
+            for doc in found
+            if not ({str(t) for t in doc.get("types", [])} & truck_types)
+        ]
+        if incompatible:
+            raise PostsIncompatibleWithTruckError(incompatible)
         origin = trucks_service.resolve_origin(truck_doc, payload.longitude, payload.latitude)
         stops = [
             PlannedStop(post_id=doc["_id"], location=doc["location"], types=doc["types"])

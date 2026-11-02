@@ -369,6 +369,39 @@ def test_create_route_errors(client, dispatcher, make_user, fake_db):
     )
 
 
+def test_create_route_manual_rejects_types_truck_cannot_carry(
+    client, dispatcher, make_user
+):
+    me = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    glass_only = _make_post(client, me, types=["glass"])
+    mixed = _make_post(client, me, types=["glass", "plastic"])
+
+    rejected = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": truck["id"],
+            "post_ids": [glass_only["id"]],
+            "depot_ids": [depot["id"]],
+        },
+        headers=dispatcher["headers"],
+    )
+    assert rejected.status_code == 400, rejected.text
+
+    # Any overlap with the truck's plastic capability is enough.
+    accepted = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": truck["id"],
+            "post_ids": [mixed["id"]],
+            "depot_ids": [depot["id"]],
+        },
+        headers=dispatcher["headers"],
+    )
+    assert accepted.status_code == 201, accepted.text
+
+
 def test_logistics_routes_require_logistics_role(client, make_user):
     resident = make_user()
     assert client.get("/api/v1/logistics/garbage", headers=resident["headers"]).status_code == 403

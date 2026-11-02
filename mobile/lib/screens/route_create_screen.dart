@@ -29,10 +29,17 @@ class RouteCreateScreen extends StatefulWidget {
 
 class _RouteCreateScreenState extends State<RouteCreateScreen> {
   final _name = TextEditingController();
-  String? _typeFilter;
+
+  /// Selected garbage types. Constrained to the picked truck's capability
+  /// (all on by default); without a truck, every type is available.
+  Set<String> _selectedTypes = Set.of(garbageTypes);
   String? _truckId;
+  Truck? _pickedTruck;
   bool _auto = true;
   final _picked = <String>{};
+
+  /// Stable key for the selection: set iteration order is not enough.
+  String get _typeKey => (_selectedTypes.toList()..sort()).join(',');
 
   /// Ordered depot picks: the first-selected depot is the route end.
   final _depots = <String>[];
@@ -61,6 +68,10 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
       showError(context, 'Pick at least one depot');
       return;
     }
+    if (_auto && _selectedTypes.isEmpty) {
+      showError(context, 'Pick at least one garbage type');
+      return;
+    }
     if (!_auto && _picked.isEmpty) {
       showError(context, 'Pick at least one post');
       return;
@@ -75,7 +86,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
         postIds: _auto ? null : _picked.toList(),
         collectionPoints:
             _collectionPoints.isEmpty ? null : List.of(_collectionPoints),
-        types: _typeFilter == null ? null : [_typeFilter!],
+        types: _selectedTypes.toList(),
         country: auth.country,
       );
       if (mounted) {
@@ -164,7 +175,17 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                             Text(
                                 '${truck.plateNumber} (${pretty(truck.status)})'),
                         ],
-                        onChanged: (v) => setState(() => _truckId = v),
+                        onChanged: (v) => setState(() {
+                          _truckId = v;
+                          _pickedTruck = null;
+                          for (final truck in trucks) {
+                            if (truck.id == v) _pickedTruck = truck;
+                          }
+                          // A new truck resets the selection to everything
+                          // it can carry.
+                          _selectedTypes = Set.of(
+                              _pickedTruck?.garbageTypes ?? garbageTypes);
+                        }),
                       ),
                     ),
                   ),
@@ -249,39 +270,41 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                   Text('Posted garbage',
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String?>(
-                    initialValue: _typeFilter,
-                    decoration: const InputDecoration(
-                      labelText: 'Filter by garbage type',
-                    ),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('All types'),
-                      ),
-                      for (final type in garbageTypes)
-                        DropdownMenuItem<String?>(
-                          value: type,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TypeDot(type),
-                              const SizedBox(width: 8),
-                              Text(pretty(type)),
-                            ],
-                          ),
+                  Text(
+                    _pickedTruck == null
+                        ? 'Showing all types — pick a truck to constrain by capability.'
+                        : 'Only types ${_pickedTruck!.plateNumber} can carry.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final type
+                          in _pickedTruck?.garbageTypes ?? garbageTypes)
+                        FilterChip(
+                          label: Text(pretty(type)),
+                          avatar: TypeDot(type),
+                          selected: _selectedTypes.contains(type),
+                          onSelected: (on) => setState(() {
+                            if (on) {
+                              _selectedTypes.add(type);
+                            } else {
+                              _selectedTypes.remove(type);
+                            }
+                          }),
                         ),
                     ],
-                    onChanged: (v) => setState(() => _typeFilter = v),
                   ),
                   const SizedBox(height: 12),
                   _PostsMap(
                     key: ValueKey((
-                      _typeFilter,
+                      _typeKey,
                       _truckId,
                       _depots.isEmpty ? null : _depots.first,
                     )),
-                    typeFilter: _typeFilter,
+                    typeFilter: _selectedTypes,
                     picked: _picked,
                     collectionPoints: _collectionPoints,
                     addPointsMode: _addPointsMode,
@@ -307,8 +330,8 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                     }),
                   ),
                   _PolygonPanel(
-                    key: ValueKey(_typeFilter),
-                    typeFilter: _typeFilter,
+                    key: ValueKey(('polygon', _typeKey)),
+                    typeFilter: _selectedTypes,
                     polygonMode: _polygonMode,
                     polygon: _polygon,
                     polygonClosed: _polygonClosed,
@@ -385,8 +408,8 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
             Text('Pick posts', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             _PostsList(
-              key: ValueKey(('list', _typeFilter)),
-              typeFilter: _typeFilter,
+              key: ValueKey(('list', _typeKey)),
+              typeFilter: _selectedTypes,
               picked: _picked,
               onToggle: (post, on) => setState(() {
                 if (on) {
@@ -411,17 +434,18 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
   }
 }
 
-/// Loads posted garbage and narrows it to the selected garbage type
-/// (client-side; null shows everything). Shared loader for map and list.
+/// Loads posted garbage and narrows it to the selected garbage types
+/// (client-side; a post shows when any of its types is selected).
+/// Shared loader for map and list.
 Future<List<GarbagePost>> _loadPosted(
-    AuthProvider auth, String? typeFilter) async {
+    AuthProvider auth, Set<String> typeFilter) async {
   final posts = await auth.logistics.listAllPosts(
     status: 'posted',
     country: auth.country,
     limit: 200,
   );
-  if (typeFilter == null) return posts;
-  return posts.where((p) => p.types.contains(typeFilter)).toList();
+  if (typeFilter.isEmpty) return [];
+  return posts.where((p) => p.types.any(typeFilter.contains)).toList();
 }
 
 /// Posted garbage plus the route endpoints: the selected truck's position
@@ -436,7 +460,7 @@ class _MapData {
 
 Future<_MapData> _loadMapData(
   AuthProvider auth,
-  String? typeFilter,
+  Set<String> typeFilter,
   String? truckId,
   String? endDepotId,
 ) async {
@@ -490,7 +514,7 @@ class _PostsMap extends StatefulWidget {
     this.tileProvider,
   });
 
-  final String? typeFilter;
+  final Set<String> typeFilter;
   final Set<String> picked;
   final List<GeoPoint> collectionPoints;
   final bool addPointsMode;
@@ -642,7 +666,7 @@ class _PolygonPanel extends StatefulWidget {
     required this.onClose,
   });
 
-  final String? typeFilter;
+  final Set<String> typeFilter;
   final bool polygonMode;
   final List<GeoPoint> polygon;
   final bool polygonClosed;
@@ -747,7 +771,7 @@ class _PostsList extends StatelessWidget {
     required this.onToggle,
   });
 
-  final String? typeFilter;
+  final Set<String> typeFilter;
   final Set<String> picked;
   final void Function(GarbagePost post, bool on) onToggle;
 

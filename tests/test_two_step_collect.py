@@ -264,7 +264,7 @@ def test_planned_route_drops_pending_and_dispute_resurrects(
     client, dispatcher, collector, make_user
 ):
     resident = make_user()
-    truck = _make_truck(client, dispatcher["headers"])
+    truck = _make_truck(client, dispatcher["headers"], garbage_types=["plastic", "glass"])
     depot = _make_facility(client, dispatcher["headers"])
     plastic = _make_post(client, resident, types=["plastic"])
     glass = _make_post(client, resident, types=["glass"])
@@ -281,7 +281,8 @@ def test_planned_route_drops_pending_and_dispute_resurrects(
 
     assert stop_ids() == [plastic["id"], glass["id"]]
 
-    _collect(client, truck["id"], dispatcher["headers"])
+    # The fake DB ignores distance, so narrow the run to plastic explicitly.
+    _collect(client, truck["id"], dispatcher["headers"], types=["plastic"])
     assert _status(client, plastic["id"], resident["headers"])["status"] == "pending_confirmation"
     assert stop_ids() == [glass["id"]]
 

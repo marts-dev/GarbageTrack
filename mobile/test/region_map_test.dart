@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,6 +53,20 @@ void main() {
       // Gapland keeps its hole ring.
       expect(regions[2].polygons.single, hasLength(2));
       expect(regions[0].centroid, const LatLng(15.4, 120.4));
+    });
+
+    test('regionContaining resolves bodies, holes, and misses', () {
+      final regions = parseRegionBoundaries(_fakeGeojson);
+      expect(regionContaining(regions, const LatLng(15.5, 120.5)),
+          'Northland');
+      expect(regionContaining(regions, const LatLng(13.5, 120.5)),
+          'Southland');
+      // Inside Gapland's outline but inside its hole: no region.
+      expect(
+          regionContaining(regions, const LatLng(15.5, 122.5)), isNull);
+      expect(
+          regionContaining(regions, const LatLng(15.1, 122.1)), 'Gapland');
+      expect(regionContaining(regions, const LatLng(10.0, 110.0)), isNull);
     });
 
     test('parses the shipped Philippines boundaries', () {
@@ -156,11 +171,46 @@ void main() {
       final at = mapRect.topLeft +
           controller.camera.getOffsetFromOrigin(southland);
       await tester.tapAt(at);
+      // Single taps wait out the double-tap timeout (also drains the
+      // double-tap-hold timer before teardown).
+      await tester.pump(const Duration(milliseconds: 500));
       await tester.pumpAndSettle();
       expect(seen, ['Southland']);
-      // Drain the map's double-tap-hold timer before teardown.
-      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('hovering a region opens nothing', (tester) async {
+      final seen = <String>[];
+      final controller = MapController();
+      addTearDown(controller.dispose);
+      final regions = parseRegionBoundaries(_fakeGeojson);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: RegionChoropleth(
+              regions: regions,
+              counts: const {},
+              onRegionTap: seen.add,
+              tileProvider: _StubTileProvider(),
+              mapController: controller,
+            ),
+          ),
+        ),
+      );
       await tester.pumpAndSettle();
+      final southland =
+          regions.firstWhere((r) => r.name == 'Southland').centroid;
+      final mapRect = tester.getRect(find.byType(FlutterMap));
+      final at = mapRect.topLeft +
+          controller.camera.getOffsetFromOrigin(southland);
+      final mouse =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(at);
+      await tester.pumpAndSettle();
+      await mouse.moveTo(at + const Offset(30, 30));
+      await tester.pumpAndSettle();
+      expect(seen, isEmpty);
+      await mouse.removePointer();
     });
 
     testWidgets('every shipped region reaches the polygon layer',

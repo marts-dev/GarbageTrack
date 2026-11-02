@@ -27,6 +27,7 @@ from app.services.logistics import (
     NoCollectablePostsError,
     PlannedRouteNotFoundError,
     PostsAlreadyCollectedError,
+    PostsIncompatibleWithTruckError,
     PostsNotFoundError,
 )
 from app.services.trucks import TruckLocationUnknownError, TruckNotFoundError
@@ -139,6 +140,8 @@ async def create_planned_route(payload: PlannedRouteCreate, user: Dispatcher, db
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from None
     except PostsAlreadyCollectedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    except PostsIncompatibleWithTruckError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
     except NoCollectablePostsError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
     except TruckLocationUnknownError as exc:
