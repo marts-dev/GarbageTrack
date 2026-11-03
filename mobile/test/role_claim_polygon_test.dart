@@ -1313,7 +1313,7 @@ void main() {
       expect(submitted['post_ids'], ['p1']);
     });
 
-    testWidgets('first-selected depot is the labeled route end',
+    testWidgets('last-selected depot is the labeled route end',
         (tester) async {
       final submitted = <String, dynamic>{};
       final auth = routeAuth(routeBackend(
@@ -1336,9 +1336,9 @@ void main() {
       await tester.tap(find.text('North Depot (Dump Site)'));
       await tester.pumpAndSettle();
 
-      // The first pick carries the End label; order is preserved.
-      expect(find.text('East Recycler (Recycling) · End'), findsOneWidget);
-      expect(find.text('North Depot (Dump Site)'), findsOneWidget);
+      // The last pick carries the End label; order is preserved.
+      expect(find.text('North Depot (Dump Site) · End'), findsOneWidget);
+      expect(find.text('East Recycler (Recycling)'), findsOneWidget);
 
       await _scrollTo(tester, find.text('Assign route'));
       await tester.tap(find.text('Assign route'));

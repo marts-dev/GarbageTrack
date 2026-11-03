@@ -303,6 +303,32 @@ def test_create_route_manual_marks_posts_scheduled(client, dispatcher, make_user
     )
 
 
+def test_create_route_geometry_ends_at_last_depot(client, dispatcher, make_user):
+    me = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    first = _make_facility(client, dispatcher["headers"])
+    second = _make_facility(
+        client,
+        dispatcher["headers"],
+        name="Far Depot",
+        location={"longitude": 9.99, "latitude": 9.99},
+    )
+    post = _make_post(client, me)
+
+    response = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": truck["id"],
+            "post_ids": [post["id"]],
+            "depot_ids": [first["id"], second["id"]],
+        },
+        headers=dispatcher["headers"],
+    )
+    assert response.status_code == 201, response.text
+    coords = response.json()["geometry"]["coordinates"]
+    assert coords[-1] == [9.99, 9.99]
+
+
 def test_create_route_auto_uses_truck_route(client, dispatcher, make_user):
     me = make_user()
     truck = _make_truck(client, dispatcher["headers"], capacity=1)

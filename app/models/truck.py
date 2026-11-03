@@ -33,5 +33,6 @@ class TruckDocument(MongoDocument):
     eta_minutes: int | None = Field(default=None, ge=0)
     capacity: int | None = Field(default=None, ge=1)
     load: int = Field(default=0, ge=0)
+    load_by_type: dict[str, int] = Field(default_factory=dict)
     operator_id: str | None = None
     created_at: datetime = Field(default_factory=utcnow)

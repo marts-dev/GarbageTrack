@@ -193,6 +193,7 @@ async def seed() -> dict:
                 eta_minutes=15,
                 capacity=10,
                 load=3,
+                load_by_type={"plastic": 2, "paper": 1},
                 operator_id=str(collector_id),
             ),
             truck_model.TruckDocument(
@@ -269,7 +270,8 @@ async def seed() -> dict:
                 name="Morning run - Commonwealth",
                 origin=route_origin,
                 stops=route_stops,
-                depot_ids=facility_ids[:2],
+                # Visit order: Cubao mid-route, Payatas last as the terminus.
+                depot_ids=[facility_ids[1], facility_ids[0]],
                 collection_points=[pt(121.0325, 14.6525), pt(121.0355, 14.6555)],
                 geometry=GeoLineString(
                     coordinates=[

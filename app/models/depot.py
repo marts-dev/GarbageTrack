@@ -14,5 +14,6 @@ class DepotReceiptDocument(MongoDocument):
     truck_id: PyObjectId
     plate_number: str
     load_cleared: int = Field(ge=0)
+    load_by_type: dict[str, int] = Field(default_factory=dict)
     received_by: str
     received_at: datetime = Field(default_factory=utcnow)

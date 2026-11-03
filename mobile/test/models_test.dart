@@ -219,12 +219,38 @@ void main() {
       'truck_id': 't1',
       'plate_number': 'DEP-1',
       'load_cleared': 2,
+      'load_by_type': {'plastic': 2},
       'received_by': 'u9',
       'received_at': '2026-11-03T08:00:00Z',
     });
     expect(receipt.plateNumber, 'DEP-1');
     expect(receipt.loadCleared, 2);
+    expect(receipt.loadByType, {'plastic': 2});
     expect(receipt.receivedAt, DateTime.parse('2026-11-03T08:00:00Z'));
+  });
+
+  test('Truck parses per-type load and summarizes fill percent', () {
+    Truck truckJson(Map<String, dynamic> overrides) => Truck.fromJson({
+          'id': 't1',
+          'plate_number': 'T-1',
+          'status': 'enroute',
+          'availability': 'working',
+          'garbage_types': ['plastic'],
+          'current_location': null,
+          'load': 0,
+          ...overrides,
+        });
+    final truck = truckJson({
+      'capacity': 10,
+      'load': 3,
+      'load_by_type': {'plastic': 2, 'paper': 1},
+    });
+    expect(truck.loadByType, {'plastic': 2, 'paper': 1});
+    expect(truck.loadSummary, 'Load 3/10 · 30%');
+
+    final legacy = truckJson({'capacity': null, 'load': 2});
+    expect(legacy.loadByType, isEmpty);
+    expect(legacy.loadSummary, 'Load 2');
   });
 
   test('isResident is true only for residents', () {

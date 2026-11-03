@@ -170,7 +170,11 @@ async def dispute_collected(db: AsyncDatabase, post_id: str) -> GarbagePostRespo
         return_document=ReturnDocument.AFTER,
     )
     if stored is not None:
-        await _return_load_to_truck(db, stored.get("collected_by_truck_id"))
+        await _return_load_to_truck(
+            db,
+            stored.get("collected_by_truck_id"),
+            [str(t) for t in stored.get("types", [])],
+        )
         return _to_response(stored)
     existing = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
     if existing is None:
@@ -178,8 +182,10 @@ async def dispute_collected(db: AsyncDatabase, post_id: str) -> GarbagePostRespo
     raise GarbageNotPendingError(post_id)
 
 
-async def _return_load_to_truck(db: AsyncDatabase, truck_id: object | None) -> None:
-    """Decrement a truck's load after a dispute (floored at zero).
+async def _return_load_to_truck(
+    db: AsyncDatabase, truck_id: object | None, types: list[str]
+) -> None:
+    """Return a disputed post's type entries to the truck (floored at zero).
 
     Legacy pending posts without an attribution stamp are skipped. A truck
     that drops back under capacity leaves the full state.
@@ -189,8 +195,13 @@ async def _return_load_to_truck(db: AsyncDatabase, truck_id: object | None) -> N
     truck_doc = await db[truck_model.COLLECTION].find_one({"_id": truck_id})
     if truck_doc is None:
         return
-    new_load = max(0, int(truck_doc.get("load", 0)) - 1)
-    update: dict = {"load": new_load}
+    load_by_type = {
+        str(k): int(v) for k, v in truck_doc.get("load_by_type", {}).items()
+    }
+    for name in types:
+        load_by_type[name] = max(0, load_by_type.get(name, 0) - 1)
+    new_load = sum(load_by_type.values())
+    update: dict = {"load": new_load, "load_by_type": load_by_type}
     capacity = truck_doc.get("capacity")
     if (
         truck_doc.get("availability") == TruckAvailability.FULL.value

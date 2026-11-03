@@ -35,6 +35,7 @@ class TruckResponse(BaseModel):
     eta_minutes: int | None
     capacity: int | None
     load: int
+    load_by_type: dict[str, int] = {}
     operator_id: str | None = None
     created_at: datetime
 
@@ -92,5 +93,6 @@ class CollectVicinityResponse(BaseModel):
     collected_count: int
     post_ids: list[str]
     load: int
+    load_by_type: dict[str, int] = {}
     capacity: int | None
     availability: TruckAvailability

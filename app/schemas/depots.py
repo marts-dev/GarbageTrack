@@ -19,5 +19,6 @@ class DepotReceiptResponse(BaseModel):
     truck_id: str
     plate_number: str
     load_cleared: int
+    load_by_type: dict[str, int] = {}
     received_by: str
     received_at: datetime

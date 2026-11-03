@@ -81,6 +81,7 @@ def _to_response(doc: dict) -> TruckResponse:
         eta_minutes=doc.get("eta_minutes"),
         capacity=doc.get("capacity"),
         load=doc.get("load", 0),
+        load_by_type={str(k): int(v) for k, v in doc.get("load_by_type", {}).items()},
         operator_id=doc.get("operator_id"),
         created_at=doc["created_at"],
     )
@@ -480,11 +481,16 @@ async def collect_vicinity(
     wanted_types = _effective_types(truck_doc, payload.types)
 
     post_ids: list[str] = []
+    collected_types: dict[str, int] = {}
     if wanted_types:
         matches = db[garbage_model.COLLECTION].find(
             _vicinity_query(origin, payload.radius_meters, wanted_types)
         )
-        post_ids = [str(doc["_id"]) async for doc in matches]
+        async for doc in matches:
+            post_ids.append(str(doc["_id"]))
+            for garbage_type in doc.get("types", []):
+                name = str(garbage_type)
+                collected_types[name] = collected_types.get(name, 0) + 1
         if post_ids:
             await db[garbage_model.COLLECTION].update_many(
                 {
@@ -500,19 +506,26 @@ async def collect_vicinity(
                 },
             )
 
+    # Each type entry consumes one capacity unit, so a two-type post counts
+    # twice; the total stays the sum of the per-type buckets.
+    load_by_type = {str(k): int(v) for k, v in truck_doc.get("load_by_type", {}).items()}
+    for name, count in collected_types.items():
+        load_by_type[name] = load_by_type.get(name, 0) + count
+    load = sum(load_by_type.values())
     capacity = truck_doc.get("capacity")
-    load = truck_doc.get("load", 0) + len(post_ids)
     availability = truck_doc.get("availability", TruckAvailability.AVAILABLE.value)
     if capacity is not None and load >= capacity:
         availability = TruckAvailability.FULL.value
     await db[truck_model.COLLECTION].update_one(
-        {"_id": truck_doc["_id"]}, {"$set": {"load": load, "availability": availability}}
+        {"_id": truck_doc["_id"]},
+        {"$set": {"load": load, "load_by_type": load_by_type, "availability": availability}},
     )
     return CollectVicinityResponse(
         truck_id=truck_id,
         collected_count=len(post_ids),
         post_ids=post_ids,
         load=load,
+        load_by_type=load_by_type,
         capacity=capacity,
         availability=availability,
     )

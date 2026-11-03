@@ -12,7 +12,11 @@ from app.services import auth as auth_service
 from app.services import depots as depots_service
 from app.services import logistics as logistics_service
 from app.services.auth import DepotBindingRoleError, DepotNotFoundError
-from app.services.depots import DepotFacilityNotFoundError, DepotNotAssignedError
+from app.services.depots import (
+    DepotFacilityNotFoundError,
+    DepotNotAssignedError,
+    UnacceptedTypesError,
+)
 from app.services.logistics import FacilityNotFoundError
 from app.services.trucks import TruckNotFoundError
 
@@ -107,6 +111,10 @@ async def receive_truck(payload: DepotReceiveRequest, user: DepotStaff, db: Db):
     except TruckNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="truck not found"
+        ) from None
+    except UnacceptedTypesError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from None
 
 

@@ -41,7 +41,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
   /// Stable key for the selection: set iteration order is not enough.
   String get _typeKey => (_selectedTypes.toList()..sort()).join(',');
 
-  /// Ordered depot picks: the first-selected depot is the route end.
+  /// Ordered depot picks in visit order: the last pick is the route end.
   final _depots = <String>[];
   final _collectionPoints = <GeoPoint>[];
   bool _addPointsMode = false;
@@ -205,7 +205,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 4),
                   Text(
-                    'Any facility can serve as a depot. The first pick is the route end.',
+                    'Any facility can serve as a depot. Picks run in visit order; the last pick is the route end.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 12),
@@ -225,9 +225,18 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                           children: [
                             for (final facility in facilities)
                               FilterChip(
-                                label: Text(
-                                  '${facility.name} (${pretty(facility.kind)})'
-                                  '${_depots.isNotEmpty && _depots.first == facility.id ? ' · End' : ''}',
+                                label: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '${facility.name} (${pretty(facility.kind)})'
+                                      '${_depots.isNotEmpty && _depots.last == facility.id ? ' · End' : ''}',
+                                    ),
+                                    const SizedBox(height: 2),
+                                    TypeDots(facility.acceptedTypes, size: 8),
+                                  ],
                                 ),
                                 selected: _depots.contains(facility.id),
                                 onSelected: (on) => setState(() {
@@ -302,7 +311,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                     key: ValueKey((
                       _typeKey,
                       _truckId,
-                      _depots.isEmpty ? null : _depots.first,
+                      _depots.isEmpty ? null : _depots.last,
                     )),
                     typeFilter: _selectedTypes,
                     picked: _picked,
@@ -311,7 +320,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                     polygonMode: _polygonMode,
                     polygon: _polygon,
                     truckId: _truckId,
-                    endDepotId: _depots.isEmpty ? null : _depots.first,
+                    endDepotId: _depots.isEmpty ? null : _depots.last,
                     fallbackCenter: viewport.center,
                     fallbackZoom: viewport.zoom,
                     tileProvider: widget.tileProvider,
@@ -449,7 +458,7 @@ Future<List<GarbagePost>> _loadPosted(
 }
 
 /// Posted garbage plus the route endpoints: the selected truck's position
-/// (route start) and the first-selected depot (route end).
+/// (route start) and the last-picked depot (route end).
 class _MapData {
   const _MapData({required this.posts, this.truckStart, this.endDepot});
 

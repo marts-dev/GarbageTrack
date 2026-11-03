@@ -134,7 +134,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('North Depot'), findsOneWidget);
       expect(find.text('DEP-1'), findsOneWidget);
-      expect(find.text('Load 2 / 10 · Working'), findsOneWidget);
+      expect(find.text('Load 2/10 · 20% · Working'), findsOneWidget);
       expect(find.text('No receipts yet.'), findsOneWidget);
 
       await tester.tap(find.widgetWithText(FilledButton, 'Receive'));
@@ -306,6 +306,41 @@ void main() {
       expect(find.text('New facility'), findsNothing);
     });
   });
+
+    testWidgets('warns on loads the depot cannot accept', (tester) async {
+      final truck = _truckJson(load: 2)
+        ..['load_by_type'] = {'glass': 1, 'plastic': 1};
+      final auth = AuthProvider.withUser(
+        _depotUser(),
+        client: ApiClient(
+          baseUrl: 'http://x',
+          httpClient: MockClient((request) async {
+            final path = request.url.path;
+            if (request.method == 'GET' && path == '/api/v1/depots/mine') {
+              return http.Response(jsonEncode(_depotJson()), 200);
+            }
+            if (request.method == 'GET' &&
+                path == '/api/v1/depots/mine/trucks') {
+              return http.Response(jsonEncode([truck]), 200);
+            }
+            if (request.method == 'GET' &&
+                path == '/api/v1/depots/mine/receipts') {
+              return http.Response(jsonEncode([]), 200);
+            }
+            return http.Response(jsonEncode({'detail': 'not found'}), 404);
+          }),
+        ),
+      );
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: auth,
+          child: const MaterialApp(home: DepotHomeScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // The depot accepts plastic only.
+      expect(find.textContaining('Cannot accept: Glass'), findsOneWidget);
+    });
 
   group('depot role routing', () {
     testWidgets('depot user lands on the depot screen', (tester) async {

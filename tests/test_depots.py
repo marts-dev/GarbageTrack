@@ -173,12 +173,14 @@ def test_receive_clears_load_and_records_receipt(
     assert body["truck_id"] == truck["id"]
     assert body["plate_number"] == "DEP-1"
     assert body["load_cleared"] == 2
+    assert body["load_by_type"] == {"plastic": 2}
     assert body["received_by"] == depot_user["id"]
 
     truck_after = client.get(
         f"/api/v1/trucks/{truck['id']}", headers=dispatcher["headers"]
     )
     assert truck_after.json()["load"] == 0
+    assert truck_after.json()["load_by_type"] == {}
     assert truck_after.json()["availability"] == "available"
 
     assert (
@@ -190,6 +192,41 @@ def test_receive_clears_load_and_records_receipt(
     )
     assert receipts.status_code == 200, receipts.text
     assert [r["id"] for r in receipts.json()] == [body["id"]]
+
+
+def test_receive_rejects_types_depot_cannot_accept(
+    client, dispatcher, depot_user, make_user
+):
+    admin = make_user("admin")
+    resident = make_user()
+    depot = _make_facility(client, dispatcher["headers"])
+    assert _bind(client, admin["headers"], depot_user["id"], depot["id"]).status_code == 200
+    truck = _make_truck(
+        client, dispatcher["headers"], garbage_types=["plastic", "glass"]
+    )
+    # A two-type post consumes two capacity units, tracked per type.
+    _make_post(client, resident, types=["glass", "plastic"])
+    collected = _collect(client, truck["id"], dispatcher["headers"])
+    assert collected["load"] == 2
+    assert collected["load_by_type"] == {"glass": 1, "plastic": 1}
+
+    # The depot accepts plastic only.
+    rejected = client.post(
+        "/api/v1/depots/mine/receive",
+        json={"truck_id": truck["id"]},
+        headers=depot_user["headers"],
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert "glass" in rejected.json()["detail"]
+
+    truck_after = client.get(
+        f"/api/v1/trucks/{truck['id']}", headers=dispatcher["headers"]
+    )
+    assert truck_after.json()["load"] == 2
+    receipts = client.get(
+        "/api/v1/depots/mine/receipts", headers=depot_user["headers"]
+    )
+    assert receipts.json() == []
 
 
 def test_depot_endpoints_enforce_role_and_binding(client, dispatcher, depot_user, make_user):
@@ -326,12 +363,16 @@ def test_dispute_returns_load_to_collecting_truck(
     p2 = _make_post(client, resident)
     _collect(client, truck["id"], dispatcher["headers"])
 
-    def load():
+    def truck_state():
         return client.get(
             f"/api/v1/trucks/{truck['id']}", headers=dispatcher["headers"]
-        ).json()["load"]
+        ).json()
+
+    def load():
+        return truck_state()["load"]
 
     assert load() == 2
+    assert truck_state()["load_by_type"] == {"plastic": 2}
     assert (
         client.patch(
             f"/api/v1/garbage/{p1['id']}/dispute-collected", headers=resident["headers"]
@@ -346,6 +387,7 @@ def test_dispute_returns_load_to_collecting_truck(
         == 200
     )
     assert load() == 0
+    assert truck_state()["load_by_type"] == {"plastic": 0}
 
 
 def test_dispute_after_receipt_floors_load_at_zero(

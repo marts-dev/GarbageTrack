@@ -364,7 +364,7 @@ class _TrucksTabState extends State<_TrucksTab> {
                           children: [
                             Text(
                               '${pretty(truck.status)} · ${pretty(truck.availability)}'
-                              '${truck.capacity != null ? ' · Load ${truck.load}/${truck.capacity}' : ''}\n'
+                              ' · ${truck.loadSummary}\n'
                               '${truck.isAssigned ? 'Operator assigned' : 'No operator'} · Takes:',
                             ),
                             const SizedBox(height: 4),

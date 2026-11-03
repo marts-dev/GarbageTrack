@@ -214,11 +214,9 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                               label: pretty(truck.status),
                               status: truck.status,
                             ),
-                            if (truck.capacity != null)
-                              Chip(
-                                label: Text(
-                                    'Load ${truck.load}/${truck.capacity}'),
-                              ),
+                            Chip(
+                              label: Text(truck.loadSummary),
+                            ),
                           ],
                         ),
                         if (truck.currentLocation != null) ...[
@@ -486,7 +484,7 @@ class _RouteTabState extends State<_RouteTab> {
               Card(
                 child: ListTile(
                   leading: const CardIcon(icon: Icons.home_work),
-                  title: Text('Ends at ${route.depots.first.name}'),
+                  title: Text('Ends at ${route.depots.last.name}'),
                   subtitle: route.depots.length > 1
                       ? Text(route.depots
                           .skip(1)

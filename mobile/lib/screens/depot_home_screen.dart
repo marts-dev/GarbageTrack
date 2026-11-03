@@ -22,12 +22,14 @@ class _DepotHomeScreenState extends State<DepotHomeScreen> {
   bool _busy = false;
 
   Future<void> _receive(Truck truck) async {
+    final breakdown = _breakdown(truck.loadByType);
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('Receive ${truck.plateNumber}?'),
         content: Text(
-          'This unloads ${truck.load} collected ${truck.load == 1 ? 'item' : 'items'} '
+          'This unloads ${truck.load} collected ${truck.load == 1 ? 'item' : 'items'}'
+          '${breakdown.isEmpty ? '' : ' ($breakdown)'} '
           'and records a receipt. The truck returns to available.',
         ),
         actions: [
@@ -90,7 +92,8 @@ class _DepotHomeScreenState extends State<DepotHomeScreen> {
               future: auth.depot.myDepot(),
               builder: (context, snapshot) {
                 final error = snapshot.error;
-                // Unassigned depot users land here, not on an error wall.
+                // A stale binding (facility deleted mid-session) lands here,
+                // not on an error wall.
                 if (error is ApiException && error.statusCode == 400) {
                   return const Card(
                     margin: EdgeInsets.zero,
@@ -105,82 +108,50 @@ class _DepotHomeScreenState extends State<DepotHomeScreen> {
                 return AsyncView<Facility>(
                   snapshot: snapshot,
                   onRetry: () => setState(() => _reload++),
-                  builder: (context, depot) => Card(
-                    margin: EdgeInsets.zero,
-                    child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          const CardIcon(icon: Icons.warehouse_outlined),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(depot.name,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium),
-                                Text(
-                                  '${pretty(depot.kind)}'
-                                  '${depot.address == null ? '' : ' · ${depot.address}'}',
-                                  style: Theme.of(context).textTheme.bodyMedium,
+                  builder: (context, depot) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Card(
+                        margin: EdgeInsets.zero,
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              const CardIcon(icon: Icons.warehouse_outlined),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(depot.name,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium),
+                                    Text(
+                                      '${pretty(depot.kind)}'
+                                      '${depot.address == null ? '' : ' · ${depot.address}'}',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium,
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                      _InboundSection(
+                        acceptedTypes: depot.acceptedTypes,
+                        reload: _reload,
+                        busy: _busy,
+                        onReceive: _receive,
+                        onRetry: () => setState(() => _reload++),
+                      ),
+                    ],
                   ),
                 );
               },
-            ),
-            const SizedBox(height: 16),
-            Text('Inbound trucks',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            FutureBuilder(
-              key: ValueKey(('inbound', _reload)),
-              future: auth.depot.inboundTrucks(),
-              builder: (context, snapshot) => AsyncView<List<Truck>>(
-                snapshot: snapshot,
-                onRetry: () => setState(() => _reload++),
-                builder: (context, trucks) {
-                  if (trucks.isEmpty) {
-                    return const Card(
-                      margin: EdgeInsets.zero,
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text('No trucks carrying a load.'),
-                      ),
-                    );
-                  }
-                  return Column(
-                    children: [
-                      for (final truck in trucks)
-                        Card(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            leading: const CardIcon(
-                                icon: Icons.local_shipping_outlined),
-                            title: Text(truck.plateNumber),
-                            subtitle: Text(
-                              'Load ${truck.load}'
-                              '${truck.capacity == null ? '' : ' / ${truck.capacity}'}'
-                              ' · ${pretty(truck.availability)}',
-                            ),
-                            trailing: FilledButton(
-                              onPressed:
-                                  _busy ? null : () => _receive(truck),
-                              child: const Text('Receive'),
-                            ),
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
             ),
             const SizedBox(height: 16),
             Text('Recent receipts',
@@ -212,8 +183,12 @@ class _DepotHomeScreenState extends State<DepotHomeScreen> {
                                 icon: Icons.receipt_long_outlined),
                             title: Text(receipt.plateNumber),
                             subtitle: Text(
-                              '${receipt.loadCleared} cleared · '
-                              '${receipt.receivedAt.toLocal()}',
+                              [
+                                '${receipt.loadCleared} cleared',
+                                if (receipt.loadByType.isNotEmpty)
+                                  _breakdown(receipt.loadByType),
+                                '${receipt.receivedAt.toLocal()}',
+                              ].join(' · '),
                             ),
                           ),
                         ),
@@ -227,4 +202,94 @@ class _DepotHomeScreenState extends State<DepotHomeScreen> {
       ),
     );
   }
+}
+
+/// Trucks carrying a load, with a warning on loads this depot cannot
+/// accept (the server rejects those receives).
+class _InboundSection extends StatelessWidget {
+  const _InboundSection({
+    required this.acceptedTypes,
+    required this.reload,
+    required this.busy,
+    required this.onReceive,
+    required this.onRetry,
+  });
+
+  final List<String> acceptedTypes;
+  final int reload;
+  final bool busy;
+  final Future<void> Function(Truck truck) onReceive;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Text('Inbound trucks', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        FutureBuilder(
+          key: ValueKey(('inbound', reload)),
+          future: auth.depot.inboundTrucks(),
+          builder: (context, snapshot) => AsyncView<List<Truck>>(
+            snapshot: snapshot,
+            onRetry: onRetry,
+            builder: (context, trucks) {
+              if (trucks.isEmpty) {
+                return const Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('No trucks carrying a load.'),
+                  ),
+                );
+              }
+              return Column(
+                children: [
+                  for (final truck in trucks)
+                    Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        leading: const CardIcon(
+                            icon: Icons.local_shipping_outlined),
+                        title: Text(truck.plateNumber),
+                        subtitle:
+                            Text(_inboundSubtitle(truck, acceptedTypes)),
+                        trailing: FilledButton(
+                          onPressed: busy ? null : () => onReceive(truck),
+                          child: const Text('Receive'),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _inboundSubtitle(Truck truck, List<String> acceptedTypes) {
+  final lines = ['${truck.loadSummary} · ${pretty(truck.availability)}'];
+  final rejected = truck.loadByType.keys
+      .where((t) => (truck.loadByType[t] ?? 0) > 0)
+      .where((t) => !acceptedTypes.contains(t))
+      .map(pretty)
+      .toList()
+    ..sort();
+  if (rejected.isNotEmpty) {
+    lines.add('Cannot accept: ${rejected.join(', ')}');
+  }
+  return lines.join('\n');
+}
+
+/// Compact per-type breakdown, e.g. "Plastic 2, Paper 1".
+String _breakdown(Map<String, int> loadByType) {
+  final entries = loadByType.entries.toList()
+    ..sort((a, b) => a.key.compareTo(b.key));
+  return entries.map((e) => '${pretty(e.key)} ${e.value}').join(', ');
 }

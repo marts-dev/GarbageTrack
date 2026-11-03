@@ -397,7 +397,8 @@ async def create_planned_route(db: AsyncDatabase, payload: PlannedRouteCreate) -
     ]
     end: GeoPoint | None = None
     if depot_object_ids:
-        depot_doc = await db[facility_model.COLLECTION].find_one({"_id": depot_object_ids[0]})
+        # Depots run in visit order; the last pick is the route end.
+        depot_doc = await db[facility_model.COLLECTION].find_one({"_id": depot_object_ids[-1]})
         if depot_doc is not None and depot_doc.get("location") is not None:
             end = GeoPoint.model_validate(depot_doc["location"])
     geometry, geometry_source = _planned_geometry(origin, stops, end)

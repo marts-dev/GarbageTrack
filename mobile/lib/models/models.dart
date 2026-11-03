@@ -199,6 +199,10 @@ class Truck {
   final int? capacity;
   final int load;
 
+  /// Per-type load entries; the total [load] is their sum. Empty for legacy
+  /// payloads and unloaded trucks.
+  final Map<String, int> loadByType;
+
   /// Id of the collector assigned as this truck's operator, or null when
   /// unassigned. Set only by logistics/admin; nullable so legacy payloads
   /// without the operator field keep parsing.
@@ -211,6 +215,7 @@ class Truck {
     required this.availability,
     required this.garbageTypes,
     required this.load,
+    this.loadByType = const {},
     this.currentLocation,
     this.etaMinutes,
     this.capacity,
@@ -230,10 +235,19 @@ class Truck {
         etaMinutes: (json['eta_minutes'] as num?)?.toInt(),
         capacity: (json['capacity'] as num?)?.toInt(),
         load: (json['load'] as num?)?.toInt() ?? 0,
+        loadByType: ((json['load_by_type'] as Map?) ?? {})
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
         operatorId: json['operator_id'] as String?,
       );
 
   int? get remainingCapacity => capacity == null ? null : capacity! - load;
+
+  /// Compact load readout with fill percentage when capacity is known.
+  String get loadSummary {
+    final capacity = this.capacity;
+    if (capacity == null || capacity <= 0) return 'Load $load';
+    return 'Load $load/$capacity · ${(load / capacity * 100).round()}%';
+  }
 
   bool get isAssigned => operatorId != null;
 
@@ -398,7 +412,7 @@ class PlannedRoute {
   /// Logistics-placed collection points, tapped on the map at creation.
   final List<GeoPoint> collectionPoints;
 
-  /// Road-following path (origin -> stops -> first-depot end).
+  /// Road-following path (origin -> stops -> last-depot end).
   /// Null on legacy payloads; callers fall back to straight lines.
   final List<GeoPoint>? geometry;
 
@@ -556,6 +570,7 @@ class DepotReceipt {
   final String truckId;
   final String plateNumber;
   final int loadCleared;
+  final Map<String, int> loadByType;
   final String receivedBy;
   final DateTime receivedAt;
 
@@ -565,6 +580,7 @@ class DepotReceipt {
     required this.truckId,
     required this.plateNumber,
     required this.loadCleared,
+    this.loadByType = const {},
     required this.receivedBy,
     required this.receivedAt,
   });
@@ -575,6 +591,8 @@ class DepotReceipt {
         truckId: json['truck_id'] as String,
         plateNumber: json['plate_number'] as String,
         loadCleared: (json['load_cleared'] as num).toInt(),
+        loadByType: ((json['load_by_type'] as Map?) ?? {})
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
         receivedBy: json['received_by'] as String,
         receivedAt: DateTime.parse(json['received_at'] as String),
       );

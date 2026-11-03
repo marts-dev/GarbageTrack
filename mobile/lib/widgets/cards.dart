@@ -120,7 +120,7 @@ class TruckCard extends StatelessWidget {
       pretty(truck.status),
       if (truck.currentLocation != null) truck.currentLocation!.short,
       if (truck.etaMinutes != null) 'ETA ${truck.etaMinutes} min',
-      if (truck.capacity != null) 'Load ${truck.load}/${truck.capacity}',
+      truck.loadSummary,
     ].join(' · ');
     final summary = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
