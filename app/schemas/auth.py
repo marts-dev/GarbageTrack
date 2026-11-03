@@ -35,11 +35,16 @@ class UserResponse(BaseModel):
     role: Role
     country: str | None
     is_active: bool
+    depot_id: str | None = None
     created_at: datetime
 
 
 class RoleUpdateRequest(BaseModel):
     role: Role
+
+
+class DepotUpdateRequest(BaseModel):
+    depot_id: str | None = None
 
 
 class ActiveUpdateRequest(BaseModel):

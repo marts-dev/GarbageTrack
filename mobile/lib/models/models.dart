@@ -12,7 +12,7 @@ const garbageTypes = [
   'general',
 ];
 
-const userRoles = ['resident', 'collector', 'logistics', 'admin'];
+const userRoles = ['resident', 'collector', 'logistics', 'depot', 'admin'];
 
 const facilityKinds = ['dump_site', 'recycling', 'waste_center'];
 
@@ -76,6 +76,10 @@ class User {
   /// accounts created before the field existed keep parsing.
   final String? country;
 
+  /// Facility id this depot user is bound to; null when unassigned (or for
+  /// non-depot roles, which never carry a binding).
+  final String? depotId;
+
   User({
     required this.id,
     required this.email,
@@ -83,6 +87,7 @@ class User {
     required this.isActive,
     this.fullName,
     this.country,
+    this.depotId,
   });
 
   factory User.fromJson(Map<String, dynamic> json) => User(
@@ -92,6 +97,7 @@ class User {
         role: json['role'] as String,
         isActive: json['is_active'] as bool? ?? true,
         country: json['country'] as String?,
+        depotId: json['depot_id'] as String?,
       );
 
   bool get isAdmin => role == 'admin';
@@ -540,5 +546,36 @@ class ClassifyResult {
         confidence: (json['confidence'] as num).toDouble(),
         placeholder: json['placeholder'] as bool? ?? false,
         message: json['message'] as String? ?? '',
+      );
+}
+
+/// Proof a depot received (unloaded) a truck.
+class DepotReceipt {
+  final String id;
+  final String depotId;
+  final String truckId;
+  final String plateNumber;
+  final int loadCleared;
+  final String receivedBy;
+  final DateTime receivedAt;
+
+  DepotReceipt({
+    required this.id,
+    required this.depotId,
+    required this.truckId,
+    required this.plateNumber,
+    required this.loadCleared,
+    required this.receivedBy,
+    required this.receivedAt,
+  });
+
+  factory DepotReceipt.fromJson(Map<String, dynamic> json) => DepotReceipt(
+        id: json['id'] as String,
+        depotId: json['depot_id'] as String,
+        truckId: json['truck_id'] as String,
+        plateNumber: json['plate_number'] as String,
+        loadCleared: (json['load_cleared'] as num).toInt(),
+        receivedBy: json['received_by'] as String,
+        receivedAt: DateTime.parse(json['received_at'] as String),
       );
 }

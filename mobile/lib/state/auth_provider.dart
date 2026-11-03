@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../api/ai_api.dart';
 import '../api/api_client.dart';
 import '../api/auth_api.dart';
+import '../api/depot_api.dart';
 import '../api/garbage_api.dart';
 import '../api/logistics_api.dart';
 import '../api/truck_api.dart';
@@ -34,6 +35,7 @@ class AuthProvider extends ChangeNotifier {
         );
     auth = AuthApi(_client);
     users = UserApi(_client);
+    depot = DepotApi(_client);
     garbage = GarbageApi(_client);
     trucks = TruckApi(_client);
     logistics = LogisticsApi(_client);
@@ -45,6 +47,7 @@ class AuthProvider extends ChangeNotifier {
 
   late final AuthApi auth;
   late final UserApi users;
+  late final DepotApi depot;
   late final GarbageApi garbage;
   late final TruckApi trucks;
   late final LogisticsApi logistics;

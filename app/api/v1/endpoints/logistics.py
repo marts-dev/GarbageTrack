@@ -35,6 +35,10 @@ from app.services.trucks import TruckLocationUnknownError, TruckNotFoundError
 router = APIRouter(prefix="/logistics", tags=["logistics"])
 
 Dispatcher = Annotated[UserResponse, Depends(require_roles(Role.LOGISTICS))]
+# Depot staff browse facilities to join one; management stays logistics-only.
+DispatcherOrDepot = Annotated[
+    UserResponse, Depends(require_roles(Role.LOGISTICS, Role.DEPOT))
+]
 Longitude = Annotated[float | None, Query(ge=-180, le=180)]
 Latitude = Annotated[float | None, Query(ge=-90, le=90)]
 Limit50 = Annotated[int, Query(ge=1, le=200)]
@@ -86,7 +90,7 @@ async def create_facility(payload: FacilityCreate, user: Dispatcher, db: Db):
 
 @router.get("/facilities", response_model=list[FacilityResponse])
 async def search_facilities(
-    user: Dispatcher,
+    user: DispatcherOrDepot,
     db: Db,
     kind: FacilityKind | None = None,
     longitude: Longitude = None,

@@ -168,7 +168,7 @@ void main() {
     expect(pretty('enroute'), 'Enroute');
   });
 
-  test('User parses country and tolerates legacy null', () {
+  test('User parses country and depot binding', () {
     final withCountry = User.fromJson({
       'id': 'u1',
       'email': 'r@x.com',
@@ -178,6 +178,18 @@ void main() {
       'country': 'Nigeria',
     });
     expect(withCountry.country, 'Nigeria');
+    expect(withCountry.depotId, isNull);
+
+    final bound = User.fromJson({
+      'id': 'u9',
+      'email': 'd@x.com',
+      'full_name': null,
+      'role': 'depot',
+      'is_active': true,
+      'country': 'Nigeria',
+      'depot_id': 'f1',
+    });
+    expect(bound.depotId, 'f1');
 
     final legacy = User.fromJson({
       'id': 'u2',
@@ -197,6 +209,22 @@ void main() {
       'is_active': true,
     });
     expect(missingKey.country, isNull);
+    expect(missingKey.depotId, isNull);
+  });
+
+  test('DepotReceipt parses a receive record', () {
+    final receipt = DepotReceipt.fromJson({
+      'id': 'r1',
+      'depot_id': 'f1',
+      'truck_id': 't1',
+      'plate_number': 'DEP-1',
+      'load_cleared': 2,
+      'received_by': 'u9',
+      'received_at': '2026-11-03T08:00:00Z',
+    });
+    expect(receipt.plateNumber, 'DEP-1');
+    expect(receipt.loadCleared, 2);
+    expect(receipt.receivedAt, DateTime.parse('2026-11-03T08:00:00Z'));
   });
 
   test('isResident is true only for residents', () {

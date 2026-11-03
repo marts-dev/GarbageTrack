@@ -66,4 +66,10 @@ class AuthApi {
     final body = await _client.patchJson('/auth/users/$userId/active', body: {'is_active': active});
     return User.fromJson(body as Map<String, dynamic>);
   }
+
+  /// Binds a depot user to a facility, or unbinds with null (admin only).
+  Future<User> updateDepot(String userId, String? depotId) async {
+    final body = await _client.patchJson('/auth/users/$userId/depot', body: {'depot_id': depotId});
+    return User.fromJson(body as Map<String, dynamic>);
+  }
 }

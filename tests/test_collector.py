@@ -242,7 +242,9 @@ def test_collect_vicinity_needs_location_and_truck(client, dispatcher, collector
     )
 
 
-def test_update_availability_and_load_reset(client, dispatcher, collector, make_user):
+def test_update_availability_keeps_load_until_depot_receipt(
+    client, dispatcher, collector, make_user
+):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"], capacity=5)
     _make_post(client, resident)
@@ -260,13 +262,14 @@ def test_update_availability_and_load_reset(client, dispatcher, collector, make_
     assert working.json()["availability"] == "working"
     assert working.json()["load"] == 1
 
+    # Flagging available no longer empties the truck: only a depot receipt does.
     available = client.patch(
         f"/api/v1/trucks/{truck['id']}/availability",
         json={"availability": "available"},
         headers=collector["headers"],
     )
     assert available.json()["availability"] == "available"
-    assert available.json()["load"] == 0
+    assert available.json()["load"] == 1
 
     bad = client.patch(
         f"/api/v1/trucks/{truck['id']}/availability",

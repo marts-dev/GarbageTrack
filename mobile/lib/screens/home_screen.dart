@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../state/auth_provider.dart';
 import 'collector_home_screen.dart';
+import 'depot_home_screen.dart';
 import 'logistics_home_screen.dart';
 import 'resident_home_screen.dart';
 import 'users_screen.dart';
@@ -29,6 +30,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return const CollectorHomeScreen();
       case 'logistics':
         return const LogisticsHomeScreen();
+      case 'depot':
+        return const DepotHomeScreen();
       case 'admin':
         break;
     }

@@ -12,6 +12,7 @@ from app.models.common import utcnow
 from app.models.garbage import GarbageStatus
 from app.models.geo import geo_point
 from app.models.route import PlannedRouteStatus
+from app.models.truck import TruckAvailability
 from app.schemas.garbage import (
     CollectionAssignmentResponse,
     GarbagePostCreate,
@@ -152,7 +153,8 @@ async def confirm_collected(db: AsyncDatabase, post_id: str) -> GarbagePostRespo
 async def dispute_collected(db: AsyncDatabase, post_id: str) -> GarbagePostResponse:
     """Reopen a pending pickup: ``pending_confirmation`` → ``posted``.
 
-    Clears ``collected_at``; raises [GarbageNotPendingError] when the post
+    Clears ``collected_at`` and returns one unit to the collecting truck's
+    load (floored at zero); raises [GarbageNotPendingError] when the post
     is not pending confirmation.
     """
     try:
@@ -168,11 +170,35 @@ async def dispute_collected(db: AsyncDatabase, post_id: str) -> GarbagePostRespo
         return_document=ReturnDocument.AFTER,
     )
     if stored is not None:
+        await _return_load_to_truck(db, stored.get("collected_by_truck_id"))
         return _to_response(stored)
     existing = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
     if existing is None:
         raise GarbagePostNotFoundError(post_id)
     raise GarbageNotPendingError(post_id)
+
+
+async def _return_load_to_truck(db: AsyncDatabase, truck_id: object | None) -> None:
+    """Decrement a truck's load after a dispute (floored at zero).
+
+    Legacy pending posts without an attribution stamp are skipped. A truck
+    that drops back under capacity leaves the full state.
+    """
+    if truck_id is None:
+        return
+    truck_doc = await db[truck_model.COLLECTION].find_one({"_id": truck_id})
+    if truck_doc is None:
+        return
+    new_load = max(0, int(truck_doc.get("load", 0)) - 1)
+    update: dict = {"load": new_load}
+    capacity = truck_doc.get("capacity")
+    if (
+        truck_doc.get("availability") == TruckAvailability.FULL.value
+        and capacity is not None
+        and new_load < capacity
+    ):
+        update["availability"] = TruckAvailability.WORKING.value
+    await db[truck_model.COLLECTION].update_one({"_id": truck_id}, {"$set": update})
 
 
 async def get_collection_assignment(

@@ -56,6 +56,65 @@ class _UsersScreenState extends State<UsersScreen> {
     }
   }
 
+  Future<void> _assignDepot(User target) async {
+    String? selected = target.depotId;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(target.email),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: FutureBuilder(
+            future:
+                context.read<AuthProvider>().logistics.listFacilities(limit: 100),
+            builder: (context, snapshot) =>
+                AsyncView<List<Facility>>(
+              snapshot: snapshot,
+              onRetry: () => setState(() {}),
+              builder: (context, facilities) => StatefulBuilder(
+                builder: (context, setDialog) => RadioGroup<String?>(
+                  groupValue: selected,
+                  onChanged: (v) => setDialog(() => selected = v),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RadioListTile<String?>(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Unassigned'),
+                        value: null,
+                      ),
+                      for (final facility in facilities)
+                        RadioListTile<String?>(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(
+                              '${facility.name} (${pretty(facility.kind)})'),
+                          value: facility.id,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Save')),
+        ],
+      ),
+    );
+    if (saved != true || !mounted) return;
+    try {
+      await context.read<AuthProvider>().auth.updateDepot(target.id, selected);
+      if (mounted) {
+        showOk(context, selected == null ? 'Depot unassigned' : 'Depot assigned');
+        setState(() => _reload++);
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
+  }
+
   Future<void> _toggleActive(User target) async {
     // Deactivation blocks login and releases trucks, so it gets a
     // confirmation; reactivation applies immediately.
@@ -130,11 +189,18 @@ class _UsersScreenState extends State<UsersScreen> {
                       title: Text(user.email),
                       subtitle: Text(
                         '${user.displayName} · ${pretty(user.role)}'
-                        '${user.isActive ? '' : ' · Inactive'}',
+                        '${user.isActive ? '' : ' · Inactive'}'
+                        '${user.role == 'depot' ? (user.depotId == null ? ' · Unassigned' : ' · Bound') : ''}',
                       ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (user.role == 'depot')
+                            IconButton(
+                              tooltip: 'Assign depot',
+                              icon: const Icon(Icons.warehouse_outlined),
+                              onPressed: () => _assignDepot(user),
+                            ),
                           IconButton(
                             tooltip: user.isActive
                                 ? 'Deactivate user'

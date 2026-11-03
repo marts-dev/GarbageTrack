@@ -4,6 +4,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.asynchronous.database import AsyncDatabase
 
+from app.models import auth as auth_model
 from app.models import facility as facility_model
 from app.models import garbage as garbage_model
 from app.models import route as route_model
@@ -242,6 +243,10 @@ async def delete_facility(db: AsyncDatabase, facility_id: str) -> None:
     result = await db[facility_model.COLLECTION].delete_one({"_id": object_id})
     if result.deleted_count == 0:
         raise FacilityNotFoundError(facility_id)
+    # Release depot users bound here so they stop pointing at a dead depot.
+    await db[auth_model.COLLECTION].update_many(
+        {"depot_id": facility_id}, {"$unset": {"depot_id": ""}}
+    )
 
 
 def _to_route_response(doc: dict) -> PlannedRouteResponse:

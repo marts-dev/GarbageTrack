@@ -495,6 +495,7 @@ async def collect_vicinity(
                     "$set": {
                         "status": GarbageStatus.PENDING_CONFIRMATION.value,
                         "collected_at": utcnow(),
+                        "collected_by_truck_id": truck_doc["_id"],
                     }
                 },
             )
@@ -539,11 +540,10 @@ async def set_availability(
     availability: TruckAvailability,
     user: object | None = None,
 ) -> TruckResponse:
+    """Flag availability only: the load clears solely on depot receipt."""
     truck_doc = await _get_truck_doc(db, truck_id)
     _require_operator_binding(truck_doc, user)
     update: dict = {"availability": availability.value}
-    if availability == TruckAvailability.AVAILABLE:
-        update["load"] = 0
     await db[truck_model.COLLECTION].update_one({"_id": truck_doc["_id"]}, {"$set": update})
     truck_doc.update(update)
     return _to_response(truck_doc)

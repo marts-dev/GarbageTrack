@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
@@ -9,9 +10,17 @@ import '../widgets/inputs.dart';
 import '../widgets/location_picker.dart';
 
 class FacilityFormScreen extends StatefulWidget {
-  const FacilityFormScreen({super.key, this.existing});
+  const FacilityFormScreen(
+      {super.key, this.existing, this.selfRegister = false, this.tileProvider});
 
   final Facility? existing;
+
+  /// Depot self-registration: creates through the depot endpoint so the
+  /// caller is bound to the new depot in the same call. Create-only.
+  final bool selfRegister;
+
+  /// Overrides tile loading (e.g. an offline stub in widget tests).
+  final TileProvider? tileProvider;
 
   @override
   State<FacilityFormScreen> createState() => _FacilityFormScreenState();
@@ -56,10 +65,19 @@ class _FacilityFormScreenState extends State<FacilityFormScreen> {
     final point = _point!;
     setState(() => _busy = true);
     try {
-      final api = context.read<AuthProvider>().logistics;
+      final auth = context.read<AuthProvider>();
       final existing = widget.existing;
-      if (existing == null) {
-        await api.createFacility(
+      if (existing == null && widget.selfRegister) {
+        await auth.depot.registerDepot(
+          name: _name.text.trim(),
+          kind: _kind,
+          longitude: point.longitude,
+          latitude: point.latitude,
+          acceptedTypes: _types.toList(),
+          address: _address.text.trim().isEmpty ? null : _address.text.trim(),
+        );
+      } else if (existing == null) {
+        await auth.logistics.createFacility(
           name: _name.text.trim(),
           kind: _kind,
           longitude: point.longitude,
@@ -68,7 +86,7 @@ class _FacilityFormScreenState extends State<FacilityFormScreen> {
           address: _address.text.trim().isEmpty ? null : _address.text.trim(),
         );
       } else {
-        await api.updateFacility(
+        await auth.logistics.updateFacility(
           existing.id,
           name: _name.text.trim(),
           kind: _kind,
@@ -173,6 +191,7 @@ class _FacilityFormScreenState extends State<FacilityFormScreen> {
                       onChanged: (point) => setState(() => _point = point),
                       fallbackCenter: viewport.center,
                       fallbackZoom: viewport.zoom,
+                      tileProvider: widget.tileProvider,
                     ),
                   ],
                 ),

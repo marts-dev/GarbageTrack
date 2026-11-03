@@ -6,7 +6,7 @@ Usage (from the repo root, uses .env unless overridden):
 
 Login with any seeded user; every password is ``Password123``:
     resident@example.com / collector@example.com /
-    logistics@example.com / admin@example.com
+    logistics@example.com / depot@example.com / admin@example.com
 """
 
 import argparse
@@ -24,6 +24,7 @@ from pymongo import AsyncMongoClient
 from app.core import security
 from app.core.config import settings
 from app.models import auth as auth_model
+from app.models import depot as depot_model
 from app.models import facility as facility_model
 from app.models import garbage as garbage_model
 from app.models import route as route_model
@@ -50,6 +51,7 @@ COLLECTIONS = [
     truck_model.COLLECTION,
     facility_model.COLLECTION,
     route_model.COLLECTION,
+    depot_model.COLLECTION,
 ]
 
 # Demo neighborhood center. Move these two constants to relocate every
@@ -78,6 +80,8 @@ async def seed() -> dict:
     db = client[settings.mongodb_db_name]
     try:
         resident_id, collector_id, logistics_id, admin_id = (ObjectId() for _ in range(4))
+        depot_user_id = ObjectId()
+        depot_facility_id = ObjectId()
         users = [
             auth_model.UserDocument(
                 id=resident_id,
@@ -102,6 +106,15 @@ async def seed() -> dict:
                 full_name="Ana Reyes",
                 role=Role.LOGISTICS,
                 country="Philippines",
+            ),
+            auth_model.UserDocument(
+                id=depot_user_id,
+                email="depot@example.com",
+                hashed_password=security.hash_password(PASSWORD),
+                full_name="Lito Cruz",
+                role=Role.DEPOT,
+                country="Philippines",
+                depot_id=str(depot_facility_id),
             ),
             auth_model.UserDocument(
                 id=admin_id,
@@ -231,7 +244,8 @@ async def seed() -> dict:
                 address="10 Central Rd, Marikina",
             ),
         ]
-        facility_ids = [ObjectId() for _ in range(len(facilities))]
+        # First facility is the seeded depot user's depot.
+        facility_ids = [depot_facility_id] + [ObjectId() for _ in range(len(facilities) - 1)]
         for facility, fid in zip(facilities, facility_ids):
             facility.id = fid
         await db[facility_model.COLLECTION].insert_many(
@@ -312,7 +326,7 @@ def main() -> int:
         return 1
     counts = asyncio.run(seed())
     print("Seeded:", ", ".join(f"{k}={v}" for k, v in counts.items()))
-    print(f"Log in with resident/collector/logistics/admin @example.com / {PASSWORD}")
+    print(f"Log in with resident/collector/logistics/depot/admin @example.com / {PASSWORD}")
     return 0
 
 

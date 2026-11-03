@@ -7,6 +7,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from app.core import security
 from app.core.config import settings
 from app.models import auth as auth_model
+from app.models import facility as facility_model
 from app.models import truck as truck_model
 from app.models.auth import Role, UserDocument
 from app.schemas.auth import UserResponse
@@ -24,6 +25,14 @@ class InvalidCredentialsError(Exception):
     pass
 
 
+class DepotBindingRoleError(Exception):
+    pass
+
+
+class DepotNotFoundError(Exception):
+    pass
+
+
 def _to_response(doc: dict) -> UserResponse:
     # Tolerate pre-migration documents that stored a roles list.
     role = doc.get("role") or (doc.get("roles") or [Role.RESIDENT.value])[0]
@@ -34,6 +43,7 @@ def _to_response(doc: dict) -> UserResponse:
         role=role,
         country=doc.get("country"),
         is_active=doc.get("is_active", True),
+        depot_id=doc.get("depot_id"),
         created_at=doc["created_at"],
     )
 
@@ -99,13 +109,50 @@ async def update_user_role(db: AsyncDatabase, user_id: str, role: Role) -> UserR
         object_id = ObjectId(user_id)
     except InvalidId as exc:
         raise UserNotFoundError(user_id) from exc
-    stored = await db[auth_model.COLLECTION].find_one_and_update(
-        {"_id": object_id}, {"$set": {"role": role.value}, "$unset": {"roles": ""}}
-    )
+    update: dict = {"$set": {"role": role.value}, "$unset": {"roles": ""}}
+    if role != Role.DEPOT:
+        # A facility binding is only meaningful for depot users.
+        update["$unset"] = {"roles": "", "depot_id": ""}
+    stored = await db[auth_model.COLLECTION].find_one_and_update({"_id": object_id}, update)
     if stored is None:
         raise UserNotFoundError(user_id)
     stored["role"] = role
     stored.pop("roles", None)
+    if role != Role.DEPOT:
+        stored.pop("depot_id", None)
+    return _to_response(stored)
+
+
+async def update_user_depot(
+    db: AsyncDatabase, user_id: str, depot_id: str | None
+) -> UserResponse:
+    """Bind a depot user to a facility (None unbinds)."""
+    try:
+        object_id = ObjectId(user_id)
+    except InvalidId as exc:
+        raise UserNotFoundError(user_id) from exc
+    stored = await db[auth_model.COLLECTION].find_one({"_id": object_id})
+    if stored is None:
+        raise UserNotFoundError(user_id)
+    if str(stored.get("role")) != Role.DEPOT.value:
+        raise DepotBindingRoleError(user_id)
+    if depot_id is None:
+        await db[auth_model.COLLECTION].update_one(
+            {"_id": object_id}, {"$unset": {"depot_id": ""}}
+        )
+        stored.pop("depot_id", None)
+        return _to_response(stored)
+    try:
+        depot_object_id = ObjectId(depot_id)
+    except InvalidId as exc:
+        raise DepotNotFoundError(depot_id) from exc
+    depot = await db[facility_model.COLLECTION].find_one({"_id": depot_object_id})
+    if depot is None:
+        raise DepotNotFoundError(depot_id)
+    await db[auth_model.COLLECTION].update_one(
+        {"_id": object_id}, {"$set": {"depot_id": depot_id}}
+    )
+    stored["depot_id"] = depot_id
     return _to_response(stored)
 
 

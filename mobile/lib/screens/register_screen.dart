@@ -132,7 +132,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   Wrap(
                     spacing: 8,
                     children: [
-                      for (final role in ['resident', 'collector', 'logistics'])
+                      for (final role in ['resident', 'collector', 'logistics', 'depot'])
                         ChoiceChip(
                           label: Text(pretty(role)),
                           selected: _role == role,

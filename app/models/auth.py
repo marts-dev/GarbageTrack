@@ -14,6 +14,7 @@ class Role(StrEnum):
     RESIDENT = "resident"
     COLLECTOR = "collector"
     LOGISTICS = "logistics"
+    DEPOT = "depot"
     ADMIN = "admin"
 
 
@@ -24,4 +25,5 @@ class UserDocument(MongoDocument):
     role: Role
     country: str | None = None
     is_active: bool = True
+    depot_id: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
