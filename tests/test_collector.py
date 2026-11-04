@@ -369,6 +369,99 @@ def test_start_route_without_assigned_route_is_404(client, dispatcher, collector
     assert response.status_code == 404
 
 
+def test_claim_and_release_round_trip(client, dispatcher, collector):
+    truck = _make_truck(client, dispatcher["headers"])
+    claimed = client.post(
+        f"/api/v1/trucks/{truck['id']}/claim", headers=collector["headers"]
+    )
+    assert claimed.status_code == 200, claimed.text
+    assert claimed.json()["operator_id"] == collector["id"]
+
+    # Re-claiming your own truck is a no-op success.
+    again = client.post(
+        f"/api/v1/trucks/{truck['id']}/claim", headers=collector["headers"]
+    )
+    assert again.status_code == 200
+
+    released = client.post(
+        f"/api/v1/trucks/{truck['id']}/release", headers=collector["headers"]
+    )
+    assert released.status_code == 200, released.text
+    assert released.json()["operator_id"] is None
+
+
+def test_claim_conflicts(client, dispatcher, collector, make_user):
+    other = make_user("collector")
+    taken = _make_truck(client, dispatcher["headers"])
+    mine = _make_truck(
+        client, dispatcher["headers"], plate_number="TRK-2"
+    )
+    _assign(client, taken["id"], other["id"], dispatcher["headers"])
+    _assign(client, mine["id"], collector["id"], dispatcher["headers"])
+
+    claimed = client.post(
+        f"/api/v1/trucks/{taken['id']}/claim", headers=collector["headers"]
+    )
+    assert claimed.status_code == 409
+
+    free = _make_truck(client, dispatcher["headers"], plate_number="TRK-3")
+    second = client.post(
+        f"/api/v1/trucks/{free['id']}/claim", headers=collector["headers"]
+    )
+    assert second.status_code == 409
+    assert "another truck" in second.json()["detail".lower()]
+
+
+def test_claim_rejects_non_collectors(client, dispatcher, make_user):
+    resident = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    assert (
+        client.post(
+            f"/api/v1/trucks/{truck['id']}/claim", headers=resident["headers"]
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"/api/v1/trucks/{truck['id']}/claim", headers=dispatcher["headers"]
+        ).status_code
+        == 422
+    )
+
+
+def test_release_blocked_by_active_run(client, dispatcher, collector, make_user):
+    resident = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    post = _make_post(client, resident)
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    _make_route(client, dispatcher["headers"], truck["id"], depot["id"], [post["id"]])
+
+    blocked = client.post(
+        f"/api/v1/trucks/{truck['id']}/release", headers=collector["headers"]
+    )
+    assert blocked.status_code == 409
+
+    finished = client.post(
+        f"/api/v1/trucks/{truck['id']}/finish-route", headers=collector["headers"]
+    )
+    assert finished.status_code == 200
+    released = client.post(
+        f"/api/v1/trucks/{truck['id']}/release", headers=collector["headers"]
+    )
+    assert released.status_code == 200
+
+
+def test_release_rejects_strangers(client, dispatcher, collector, make_user):
+    other = make_user("collector")
+    truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    response = client.post(
+        f"/api/v1/trucks/{truck['id']}/release", headers=other["headers"]
+    )
+    assert response.status_code == 403
+
+
 def test_collector_routes_require_collector_role(client, dispatcher, make_user):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"])
@@ -396,10 +489,26 @@ def test_collector_routes_require_collector_role(client, dispatcher, make_user):
         ).status_code
         == 403
     )
+    assert (
+        client.post(
+            f"/api/v1/trucks/{truck['id']}/claim",
+            headers=resident["headers"],
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"/api/v1/trucks/{truck['id']}/release",
+            headers=resident["headers"],
+        ).status_code
+        == 403
+    )
     assert client.get(f"/api/v1/trucks/{truck['id']}/route").status_code == 401
 
 
-@pytest.mark.parametrize("route", ["route", "collect-vicinity", "finish-route", "start-route"])
+@pytest.mark.parametrize(
+    "route", ["route", "collect-vicinity", "finish-route", "start-route", "claim", "release"]
+)
 def test_collector_routes_reject_unknown_truck(client, collector, route):
     if route == "route":
         response = client.get(
@@ -411,14 +520,9 @@ def test_collector_routes_reject_unknown_truck(client, collector, route):
             json={},
             headers=collector["headers"],
         )
-    elif route == "finish-route":
-        response = client.post(
-            "/api/v1/trucks/000000000000000000000000/finish-route",
-            headers=collector["headers"],
-        )
     else:
         response = client.post(
-            "/api/v1/trucks/000000000000000000000000/start-route",
+            f"/api/v1/trucks/000000000000000000000000/{route}",
             headers=collector["headers"],
         )
     assert response.status_code == 404

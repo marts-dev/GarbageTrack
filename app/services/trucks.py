@@ -74,6 +74,10 @@ class NoAssignedRouteError(Exception):
     pass
 
 
+class TruckHasActiveRouteError(Exception):
+    pass
+
+
 class EmptyUpdateError(Exception):
     pass
 
@@ -662,4 +666,63 @@ async def start_assigned_route(
         },
         {"$set": {"status": PlannedRouteStatus.IN_PROGRESS.value}},
     )
+    return _to_response(truck_doc)
+
+
+async def claim_truck(
+    db: AsyncDatabase, truck_id: str, user: object | None = None
+) -> TruckResponse:
+    """Bind the calling collector to an unassigned truck (self-service).
+
+    Re-claiming your own truck is a no-op success; claiming another
+    operator's truck, or a second truck while bound to one, is a 409.
+    Mirrors the one-truck-per-collector rule in [update_truck].
+    """
+    user_id = str(getattr(user, "id", "") or "")
+    if not user_id:
+        raise TruckNotAssignedError("collector sign-in required")
+    role = getattr(user, "role", None)
+    if role != Role.COLLECTOR and str(role) != Role.COLLECTOR.value:
+        raise TruckOperatorInvalidError("operator must be a collector user")
+    truck_doc = await _get_truck_doc(db, truck_id)
+    if truck_doc.get("operator_id") == user_id:
+        return _to_response(truck_doc)
+    if truck_doc.get("operator_id") is not None:
+        raise TruckOperatorConflictError("truck already assigned to another operator")
+    async for _other in db[truck_model.COLLECTION].find({"operator_id": user_id}):
+        raise TruckOperatorConflictError("collector already assigned to another truck")
+    await db[truck_model.COLLECTION].update_one(
+        {"_id": truck_doc["_id"]}, {"$set": {"operator_id": user_id}}
+    )
+    truck_doc["operator_id"] = user_id
+    return _to_response(truck_doc)
+
+
+async def release_truck(
+    db: AsyncDatabase, truck_id: str, user: object | None = None
+) -> TruckResponse:
+    """Unbind the calling collector from their truck (end of shift).
+
+    Blocked while the truck has an assigned or in-progress run so a run
+    never strands mid-route; finish it first.
+    """
+    truck_doc = await _get_truck_doc(db, truck_id)
+    _require_operator_binding(truck_doc, user)
+    active = await db[route_model.COLLECTION].find_one(
+        {
+            "truck_id": truck_doc["_id"],
+            "status": {
+                "$in": [
+                    PlannedRouteStatus.ASSIGNED.value,
+                    PlannedRouteStatus.IN_PROGRESS.value,
+                ]
+            },
+        }
+    )
+    if active is not None:
+        raise TruckHasActiveRouteError("truck has an active run")
+    await db[truck_model.COLLECTION].update_one(
+        {"_id": truck_doc["_id"]}, {"$set": {"operator_id": None}}
+    )
+    truck_doc["operator_id"] = None
     return _to_response(truck_doc)

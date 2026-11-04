@@ -144,6 +144,20 @@ class TruckApi {
     return Truck.fromJson(body as Map<String, dynamic>);
   }
 
+  /// Binds the calling collector to an unassigned truck. 409 when the
+  /// truck is taken or the collector already operates another truck.
+  Future<Truck> claimTruck(String truckId) async {
+    final body = await _client.postJson('/trucks/$truckId/claim');
+    return Truck.fromJson(body as Map<String, dynamic>);
+  }
+
+  /// Unbinds the calling collector from their truck. 403 for strangers,
+  /// 409 while the truck has an active run.
+  Future<Truck> releaseTruck(String truckId) async {
+    final body = await _client.postJson('/trucks/$truckId/release');
+    return Truck.fromJson(body as Map<String, dynamic>);
+  }
+
   /// Pings the truck's live position. Collectors may only ping the truck
   /// they operate (403 otherwise); logistics/admin may ping any truck.
   Future<Truck> updateLocation(

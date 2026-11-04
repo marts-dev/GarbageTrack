@@ -620,7 +620,7 @@ void main() {
               200,
             );
           }
-          return http.Response('not found', 404);
+          return http.Response(jsonEncode({'detail': 'nope'}), 404);
         });
 
     AuthProvider collectorAuth(
@@ -665,15 +665,36 @@ void main() {
       for (final tab in ['Route', 'Collect']) {
         expect(find.text(tab), findsOneWidget);
       }
-      // No claim UI anywhere.
-      expect(find.widgetWithText(FilledButton, 'Claim'), findsNothing);
-      expect(find.widgetWithText(OutlinedButton, 'Release'), findsNothing);
+      // The detail shows the ownership row: own truck -> Release, no Claim.
+      expect(find.text('Release truck'), findsOneWidget);
+      expect(find.text('Claim truck'), findsNothing);
       expect(find.text('My truck'), findsNothing);
+    });
+
+    testWidgets('unassigned collector sees claimable trucks', (tester) async {
+      final calls = <String>[];
+      final operators = <String, String?>{'t1': 'u9', 't2': null, 't3': null};
+      await pumpCollector(tester, collectorAuth(operators, calls));
+      expect(find.text('Available trucks'), findsOneWidget);
+      expect(
+        find.text('Claim a truck to start collecting.'),
+        findsOneWidget,
+      );
+      expect(find.text('BBB-2'), findsOneWidget);
+      expect(find.text('CCC-3'), findsOneWidget);
+      expect(find.text('AAA-1'), findsNothing);
+      for (final tab in ['Route', 'Collect']) {
+        expect(find.text(tab), findsNothing);
+      }
     });
 
     testWidgets('unassigned collector sees the empty state', (tester) async {
       final calls = <String>[];
-      final operators = <String, String?>{'t1': 'u9', 't2': null, 't3': null};
+      final operators = <String, String?>{
+        't1': 'u9',
+        't2': 'u9',
+        't3': 'u9',
+      };
       await pumpCollector(tester, collectorAuth(operators, calls));
       expect(find.text('No truck assigned'), findsOneWidget);
       expect(find.text('Ask logistics to assign you a truck.'), findsOneWidget);
@@ -681,6 +702,16 @@ void main() {
       for (final tab in ['Route', 'Collect']) {
         expect(find.text(tab), findsNothing);
       }
+    });
+
+    testWidgets('claimable truck opens the detail for claiming', (tester) async {
+      final calls = <String>[];
+      final operators = <String, String?>{'t1': 'u9', 't2': null, 't3': null};
+      await pumpCollector(tester, collectorAuth(operators, calls));
+      await tester.tap(find.text('BBB-2'));
+      await tester.pumpAndSettle();
+      expect(find.text('Claim truck'), findsOneWidget);
+      expect(find.text('BBB-2'), findsOneWidget);
     });
 
     testWidgets('collect 403 surfaces the server detail', (tester) async {
@@ -717,28 +748,52 @@ void main() {
       bool noPlannedRoute = false,
       int? planTotalStops = 3,
       String planStatus = 'assigned',
+      int releaseStatus = 200,
       Map<String, dynamic>? collectBody,
     }) {
       var routeCalls = 0;
       var shared = false;
       var started = false;
+      var finished = false;
+      var boundOperator = operators['t1'];
       return MockClient((request) async {
         final path = request.url.path;
         calls.add('${request.method} $path');
         if (request.method == 'GET' && path == '/api/v1/trucks/t1') {
           return http.Response(
             jsonEncode(_truckJson('t1', 'AAA-1',
-                operatorId: operators['t1'],
+                operatorId: boundOperator,
                 availability: truckAvailability,
                 location:
                     shared ? sharedLocation ?? truckLocation : truckLocation)),
             200,
           );
         }
+        if (request.method == 'POST' && path == '/api/v1/trucks/t1/claim') {
+          boundOperator = 'u1';
+          return http.Response(
+            jsonEncode(_truckJson('t1', 'AAA-1',
+                operatorId: 'u1', availability: truckAvailability)),
+            200,
+          );
+        }
+        if (request.method == 'POST' && path == '/api/v1/trucks/t1/release') {
+          if (releaseStatus != 200) {
+            return http.Response(
+              jsonEncode({'detail': 'truck has an active run'}),
+              releaseStatus,
+            );
+          }
+          boundOperator = null;
+          return http.Response(
+            jsonEncode(_truckJson('t1', 'AAA-1', availability: 'available')),
+            200,
+          );
+        }
         if (request.method == 'GET' &&
             path == '/api/v1/trucks/t1/planned-route') {
           routeCalls++;
-          if (noPlannedRoute) {
+          if (noPlannedRoute || finished) {
             return http.Response(
               jsonEncode({'detail': 'no planned route for this truck'}),
               404,
@@ -799,6 +854,7 @@ void main() {
               finishStatus,
             );
           }
+          finished = true;
           return http.Response(
             jsonEncode(_truckJson('t1', 'AAA-1',
                 operatorId: operators['t1'], availability: 'available')),
@@ -832,6 +888,7 @@ void main() {
       bool noPlannedRoute = false,
       int? planTotalStops = 3,
       String planStatus = 'assigned',
+      int releaseStatus = 200,
       Map<String, dynamic>? collectBody,
     }) =>
         AuthProvider.withUser(
@@ -851,6 +908,7 @@ void main() {
               noPlannedRoute: noPlannedRoute,
               planTotalStops: planTotalStops,
               planStatus: planStatus,
+              releaseStatus: releaseStatus,
               collectBody: collectBody,
             ),
           ),
@@ -877,12 +935,8 @@ void main() {
       final calls = <String>[];
       await pumpDetail(tester, detailAuth({'t1': null}, calls));
       expect(find.text('Unassigned'), findsOneWidget);
-      expect(
-        find.text('Logistics assigns an operator to this truck.'),
-        findsOneWidget,
-      );
-      expect(find.widgetWithText(FilledButton, 'Claim'), findsNothing);
-      expect(find.widgetWithText(OutlinedButton, 'Release'), findsNothing);
+      expect(find.text('Claim truck'), findsOneWidget);
+      expect(find.text('Release truck'), findsNothing);
 
       await tester.tap(find.text('Collect'));
       await tester.pumpAndSettle();
@@ -896,6 +950,67 @@ void main() {
         find.widgetWithText(FilledButton, 'Collect vicinity'),
       );
       expect(collect.onPressed, isNull);
+    });
+
+    testWidgets('claim binds the truck and unlocks the detail', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': null}, calls));
+      await tester.tap(find.text('Claim truck'));
+      await tester.pumpAndSettle();
+
+      expect(calls, contains('POST /api/v1/trucks/t1/claim'));
+      expect(find.text('Truck claimed.'), findsOneWidget);
+      expect(find.text('Assigned to you'), findsOneWidget);
+      expect(find.text('Release truck'), findsOneWidget);
+      expect(find.text('Claim truck'), findsNothing);
+      // Bound now: run controls and collection unlock.
+      expect(find.text('Start run'), findsOneWidget);
+    });
+
+    testWidgets('release unbinds the truck and locks the detail',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      expect(find.text('Release truck'), findsOneWidget);
+
+      await tester.tap(find.text('Release truck'));
+      await tester.pumpAndSettle();
+      expect(find.text('Release truck?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Release'));
+      await tester.pumpAndSettle();
+
+      expect(calls, contains('POST /api/v1/trucks/t1/release'));
+      expect(find.text('Truck released.'), findsOneWidget);
+      expect(find.text('Claim truck'), findsOneWidget);
+      expect(find.text('Release truck'), findsNothing);
+      expect(find.text('Start run'), findsNothing);
+      expect(find.text('Finish run'), findsNothing);
+    });
+
+    testWidgets('release cancel sends nothing', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      await tester.tap(find.text('Release truck'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(calls, isNot(contains('POST /api/v1/trucks/t1/release')));
+      expect(find.text('Assigned to you'), findsOneWidget);
+    });
+
+    testWidgets('release blocked by an active run surfaces the detail',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, releaseStatus: 409),
+      );
+      await tester.tap(find.text('Release truck'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Release'));
+      await tester.pumpAndSettle();
+      expect(find.text('truck has an active run'), findsOneWidget);
+      expect(find.text('Assigned to you'), findsOneWidget);
     });
 
     testWidgets('assigned operator sees the share-location button',
@@ -1491,12 +1606,56 @@ void main() {
       expect(find.text('Start run'), findsNothing);
     });
 
-    testWidgets('finish run hides on an unscheduled truck', (tester) async {
+    testWidgets('run buttons hide on an idle truck with no plan',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth(
+          {'t1': 'u1'},
+          calls,
+          truckAvailability: 'available',
+          noPlannedRoute: true,
+        ),
+      );
+      expect(find.text('Finish run'), findsNothing);
+      expect(find.text('Start run'), findsNothing);
+    });
+
+    testWidgets('finish stays available after depot receiving', (tester) async {
+      // Receiving flips the truck to available while the run is still
+      // open; the run must stay finishable or the route strands in
+      // progress (and goes overdue) with no way to close it.
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth(
+          {'t1': 'u1'},
+          calls,
+          truckAvailability: 'available',
+          planStatus: 'in_progress',
+        ),
+      );
+      expect(find.text('Finish run'), findsOneWidget);
+
+      await tester.tap(find.text('Finish run'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish'));
+      await tester.pumpAndSettle();
+      expect(calls, contains('POST /api/v1/trucks/t1/finish-route'));
+      // No active run left, so the slot goes away.
+      expect(find.text('Finish run'), findsNothing);
+      expect(find.text('Start run'), findsNothing);
+    });
+
+    testWidgets('start shows for an assigned run on an available truck',
+        (tester) async {
       final calls = <String>[];
       await pumpDetail(
         tester,
         detailAuth({'t1': 'u1'}, calls, truckAvailability: 'available'),
       );
+      expect(find.text('Start run'), findsOneWidget);
       expect(find.text('Finish run'), findsNothing);
     });
 

@@ -24,6 +24,7 @@ from app.services.trucks import (
     NoActiveRouteError,
     NoAssignedRouteError,
     NoPlannedRouteError,
+    TruckHasActiveRouteError,
     TruckHasRoutesError,
     TruckLocationUnknownError,
     TruckNotAssignedError,
@@ -212,6 +213,36 @@ async def start_route(truck_id: str, user: Collector, db: Db):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="truck has no assigned route"
         ) from None
+
+
+@router.post("/{truck_id}/claim", response_model=TruckResponse)
+async def claim_truck(truck_id: str, user: Collector, db: Db):
+    """Bind the calling collector to an unassigned truck."""
+    try:
+        return await trucks_service.claim_truck(db, truck_id, user)
+    except TruckNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
+    except TruckNotAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from None
+    except TruckOperatorConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    except TruckOperatorInvalidError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from None
+
+
+@router.post("/{truck_id}/release", response_model=TruckResponse)
+async def release_truck(truck_id: str, user: Collector, db: Db):
+    """Unbind the calling collector from their truck."""
+    try:
+        return await trucks_service.release_truck(db, truck_id, user)
+    except TruckNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
+    except TruckNotAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from None
+    except TruckHasActiveRouteError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
 
 
 @router.post("/{truck_id}/location", response_model=TruckResponse)

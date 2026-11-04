@@ -175,6 +175,63 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
     }
   }
 
+  /// Self-service binding: the signed-in collector takes an unassigned
+  /// truck. No confirm step — releasing is one tap away.
+  Future<void> _claimTruck() async {
+    setState(() => _busy = true);
+    try {
+      final truck =
+          await context.read<AuthProvider>().trucks.claimTruck(widget.truckId);
+      if (mounted) {
+        showOk(context, 'Truck claimed.');
+        setState(() => _freshTruck = truck);
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// End-of-shift unbind. The server refuses while the truck has an active
+  /// run, so the dialog says to finish first.
+  Future<void> _releaseTruck() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Release truck?'),
+        content: const Text(
+            'You will no longer operate this truck. Trucks with an active run cannot be released — finish the run first.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Release'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final truck = await context
+          .read<AuthProvider>()
+          .trucks
+          .releaseTruck(widget.truckId);
+      if (mounted) {
+        showOk(context, 'Truck released.');
+        setState(() => _freshTruck = truck);
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   /// Closes the truck's active run. Availability is process-owned now, so
   /// this is the only way a truck returns to unscheduled from the UI.
   Future<void> _finishRoute() async {
@@ -294,11 +351,11 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                           ],
                           // Header actions share one row so the header keeps its
                           // height and the tab body below keeps its space.
+                          // Collectors see these only on their own truck; the
+                          // API also rejects other operators with 403.
                           if ((auth.user?.isCollector == true &&
                                   truck.isOperatedBy(auth.user!.id)) ||
-                              (truck.availability == 'working' &&
-                                  (auth.user?.isCollector != true ||
-                                      truck.isOperatedBy(auth.user!.id)))) ...[
+                              auth.user?.isCollector != true) ...[
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 8,
@@ -312,51 +369,64 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                                         const Icon(Icons.my_location_outlined),
                                     label: const Text('Share my location'),
                                   ),
-                                // One run button per state: assigned runs
-                                // start, anything else finishes. Collectors
-                                // see this only on their own truck; the API
-                                // also rejects other operators with 403.
-                                // While the status loads (or when the run
-                                // is unknown) the slot keeps Finish, the
+                                // One run button per run state, gated on the
+                                // plan rather than truck availability: depot
+                                // receiving flips the truck back to available
+                                // while the run is still open, and the run
+                                // must stay finishable after that. While the
+                                // status loads (or when the run is unknown)
+                                // a working truck keeps Finish, the
                                 // long-standing action.
-                                if (truck.availability == 'working' &&
-                                    (auth.user?.isCollector != true ||
-                                        truck.isOperatedBy(auth.user!.id)))
-                                  FutureBuilder(
-                                    future: _planFuture,
-                                    builder: (context, snapshot) {
-                                      final assigned =
-                                          snapshot.data?.status == 'assigned';
-                                      return FilledButton.tonalIcon(
-                                        onPressed: _busy
-                                            ? null
-                                            : (assigned
-                                                ? _startRoute
-                                                : _finishRoute),
-                                        icon: Icon(assigned
-                                            ? Icons.play_arrow_outlined
-                                            : Icons.flag_outlined),
-                                        label: Text(assigned
-                                            ? 'Start run'
-                                            : 'Finish run'),
-                                      );
-                                    },
-                                  ),
+                                FutureBuilder(
+                                  future: _planFuture,
+                                  builder: (context, snapshot) {
+                                    final status = snapshot.data?.status;
+                                    final showStart = status == 'assigned';
+                                    final showFinish = status == 'in_progress' ||
+                                        (status == null &&
+                                            truck.availability == 'working');
+                                    if (!showStart && !showFinish) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return FilledButton.tonalIcon(
+                                      onPressed: _busy
+                                          ? null
+                                          : (showStart
+                                              ? _startRoute
+                                              : _finishRoute),
+                                      icon: Icon(showStart
+                                          ? Icons.play_arrow_outlined
+                                          : Icons.flag_outlined),
+                                      label: Text(showStart
+                                          ? 'Start run'
+                                          : 'Finish run'),
+                                    );
+                                  },
+                                ),
                               ],
                             ),
                           ],
-                          const SizedBox(height: 4),
-                          Text(
-                            'Takes:',
-                            style: Theme.of(context).textTheme.bodyMedium,
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'Takes:',
+                                style:
+                                    Theme.of(context).textTheme.bodyMedium,
+                              ),
+                              TypeChips(truck.garbageTypes),
+                            ],
                           ),
-                          const SizedBox(height: 4),
-                          TypeChips(truck.garbageTypes),
                           if (auth.user?.isCollector ?? false) ...[
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 8),
                             _AssignmentRow(
                               truck: truck,
                               myId: auth.user!.id,
+                              onClaim: _busy ? null : _claimTruck,
+                              onRelease: _busy ? null : _releaseTruck,
                             ),
                           ],
                         ],
@@ -402,13 +472,21 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
   }
 }
 
-/// Operator binding banner for collector users. Logistics/admins assign the
-/// operator from the truck form; collectors only see who holds the truck.
+/// Operator binding banner for collector users: claim an unassigned
+/// truck, or release your own at end of shift. Logistics/admins keep the
+/// truck-form override for both directions.
 class _AssignmentRow extends StatelessWidget {
-  const _AssignmentRow({required this.truck, required this.myId});
+  const _AssignmentRow({
+    required this.truck,
+    required this.myId,
+    required this.onClaim,
+    required this.onRelease,
+  });
 
   final Truck truck;
   final String myId;
+  final VoidCallback? onClaim;
+  final VoidCallback? onRelease;
 
   @override
   Widget build(BuildContext context) {
@@ -418,20 +496,59 @@ class _AssignmentRow extends StatelessWidget {
         : truck.isAssigned
             ? const StatusPill(label: 'Assigned', status: 'full')
             : const StatusPill(label: 'Unassigned', status: 'available');
+    // One row: the pill names the state and the button acts on it. Only
+    // another operator's truck needs an explanation line, since its
+    // actions stay hidden.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        pill,
-        const SizedBox(height: 4),
-        Text(
-          mine
-              ? 'Collect and finish runs from your truck.'
-              : truck.isAssigned
-                  ? 'Only the assigned operator can collect or finish runs on this truck.'
-                  : 'Logistics assigns an operator to this truck.',
-          style: Theme.of(context).textTheme.bodySmall,
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            pill,
+            if (mine)
+              OutlinedButton(
+                onPressed: onRelease,
+                child: const Text('Release truck'),
+              )
+            else if (!truck.isAssigned)
+              FilledButton.tonal(
+                onPressed: onClaim,
+                child: const Text('Claim truck'),
+              ),
+          ],
         ),
+        if (!mine && truck.isAssigned)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              'Only the assigned operator can collect or finish runs on this truck.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
       ],
+    );
+  }
+}
+
+/// Centers tab placeholder states but lets them scroll instead of
+/// overflowing when the header leaves little vertical room.
+class _ScrollSafe extends StatelessWidget {
+  const _ScrollSafe({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Center(child: child),
+        ),
+      ),
     );
   }
 }
@@ -506,17 +623,22 @@ class _RouteTabState extends State<_RouteTab> {
         }
         if (snapshot.hasError) {
           final error = snapshot.error;
-          return ErrorView(
-            message: error is ApiException ? error.message : error.toString(),
-            onRetry: widget.onRetry,
+          return _ScrollSafe(
+            child: ErrorView(
+              message:
+                  error is ApiException ? error.message : error.toString(),
+              onRetry: widget.onRetry,
+            ),
           );
         }
         final route = snapshot.data;
         if (route == null) {
-          return const EmptyState(
-            icon: Icons.route_outlined,
-            title: 'No route assigned.',
-            subtitle: 'Ask logistics to assign one.',
+          return const _ScrollSafe(
+            child: EmptyState(
+              icon: Icons.route_outlined,
+              title: 'No route assigned.',
+              subtitle: 'Ask logistics to assign one.',
+            ),
           );
         }
         if (route.stops.isEmpty) {

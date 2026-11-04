@@ -235,18 +235,16 @@ def test_logistics_and_admin_bypass_assignment(client, dispatcher, make_user):
         )
 
 
-def test_claim_and_release_routes_removed(client, dispatcher, collector):
+def test_claim_and_release_routes_available(client, dispatcher, collector):
     truck = _make_truck(client, dispatcher["headers"])
-    assert (
-        client.post(f"/api/v1/trucks/{truck['id']}/claim", headers=collector["headers"]).status_code
-        == 404
+    claim = client.post(
+        f"/api/v1/trucks/{truck['id']}/claim", headers=collector["headers"]
     )
-    assert (
-        client.post(
-            f"/api/v1/trucks/{truck['id']}/release", headers=collector["headers"]
-        ).status_code
-        == 404
+    assert claim.status_code == 200
+    release = client.post(
+        f"/api/v1/trucks/{truck['id']}/release", headers=collector["headers"]
     )
+    assert release.status_code == 200
 
 
 def test_binding_unknown_truck_404(client, dispatcher, collector):
