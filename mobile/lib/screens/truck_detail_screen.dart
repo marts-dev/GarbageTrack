@@ -8,6 +8,7 @@ import '../models/models.dart';
 import '../state/auth_provider.dart';
 import '../utils/country_viewports.dart';
 import '../utils/dates.dart';
+import '../utils/geo.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import '../widgets/type_dots.dart';
@@ -200,51 +201,50 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
         builder: (context, loaded) {
           final truck = _freshTruck ?? loaded;
           return DefaultTabController(
-          length: 2,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Card(
-                  margin: EdgeInsets.zero,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                truck.plateNumber,
-                                style: Theme.of(context).textTheme.titleLarge,
+            length: 2,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Card(
+                    margin: EdgeInsets.zero,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  truck.plateNumber,
+                                  style: Theme.of(context).textTheme.titleLarge,
+                                ),
                               ),
-                            ),
-                            StatusPill(
-                              label: pretty(truck.availability),
-                              status: truck.availability,
+                              StatusPill(
+                                label: pretty(truck.availability),
+                                status: truck.availability,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Chip(
+                            label: Text(truck.loadSummary),
+                          ),
+                          if (truck.currentLocation != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              truck.currentLocation!.short,
+                              style: Theme.of(context).textTheme.bodyMedium,
                             ),
                           ],
-                        ),
-                        const SizedBox(height: 8),
-                        Chip(
-                          label: Text(truck.loadSummary),
-                        ),
-                        if (truck.currentLocation != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            truck.currentLocation!.short,
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                        ],
                           // Header actions share one row so the header keeps its
                           // height and the tab body below keeps its space.
                           if ((auth.user?.isCollector == true &&
-                                      truck.isOperatedBy(auth.user!.id)) ||
-                                  (truck.availability == 'working' &&
-                                      (auth.user?.isCollector != true ||
-                                          truck.isOperatedBy(
-                                              auth.user!.id)))) ...[
+                                  truck.isOperatedBy(auth.user!.id)) ||
+                              (truck.availability == 'working' &&
+                                  (auth.user?.isCollector != true ||
+                                      truck.isOperatedBy(auth.user!.id)))) ...[
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 8,
@@ -253,12 +253,10 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                                 if (auth.user?.isCollector == true &&
                                     truck.isOperatedBy(auth.user!.id))
                                   FilledButton.tonalIcon(
-                                    onPressed:
-                                        _busy ? null : _shareLocation,
-                                    icon: const Icon(
-                                        Icons.my_location_outlined),
-                                    label:
-                                        const Text('Share my location'),
+                                    onPressed: _busy ? null : _shareLocation,
+                                    icon:
+                                        const Icon(Icons.my_location_outlined),
+                                    label: const Text('Share my location'),
                                   ),
                                 // A working truck has an active run.
                                 // Collectors see this only on their own
@@ -269,61 +267,60 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                                         truck.isOperatedBy(auth.user!.id)))
                                   FilledButton.tonalIcon(
                                     onPressed: _busy ? null : _finishRoute,
-                                    icon:
-                                        const Icon(Icons.flag_outlined),
+                                    icon: const Icon(Icons.flag_outlined),
                                     label: const Text('Finish run'),
                                   ),
                               ],
                             ),
                           ],
-                        const SizedBox(height: 4),
-                        Text(
-                          'Takes:',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: 4),
-                        TypeChips(truck.garbageTypes),
-                        if (auth.user?.isCollector ?? false) ...[
-                          const SizedBox(height: 12),
-                          _AssignmentRow(
-                            truck: truck,
-                            myId: auth.user!.id,
+                          const SizedBox(height: 4),
+                          Text(
+                            'Takes:',
+                            style: Theme.of(context).textTheme.bodyMedium,
                           ),
+                          const SizedBox(height: 4),
+                          TypeChips(truck.garbageTypes),
+                          if (auth.user?.isCollector ?? false) ...[
+                            const SizedBox(height: 12),
+                            _AssignmentRow(
+                              truck: truck,
+                              myId: auth.user!.id,
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const TabBar(
-                tabs: [
-                  Tab(text: 'Route'),
-                  Tab(text: 'Collect'),
-                ],
-              ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _RouteTab(
-                      truck: truck,
-                      tileProvider: widget.tileProvider,
-                        extraReload: _routeReload,
-                    ),
-                    _CollectTab(
-                      truck: truck,
-                      tileProvider: widget.tileProvider,
-                      positionProvider: widget.positionProvider,
-                      // Collectors act only on their assigned truck; the API
-                      // bypasses the binding check for logistics/admins.
-                      assignedGuarded: auth.user?.role == 'collector' &&
-                          !truck.isOperatedBy(auth.user!.id),
-                        onChanged: _refreshAfterCollect,
-                    ),
+                const TabBar(
+                  tabs: [
+                    Tab(text: 'Route'),
+                    Tab(text: 'Collect'),
                   ],
                 ),
-              ),
-            ],
-          ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _RouteTab(
+                        truck: truck,
+                        tileProvider: widget.tileProvider,
+                        extraReload: _routeReload,
+                      ),
+                      _CollectTab(
+                        truck: truck,
+                        tileProvider: widget.tileProvider,
+                        positionProvider: widget.positionProvider,
+                        // Collectors act only on their assigned truck; the API
+                        // bypasses the binding check for logistics/admins.
+                        assignedGuarded: auth.user?.role == 'collector' &&
+                            !truck.isOperatedBy(auth.user!.id),
+                        onChanged: _refreshAfterCollect,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -455,8 +452,7 @@ class _RouteTabState extends State<_RouteTab> {
         if (snapshot.hasError) {
           final error = snapshot.error;
           return ErrorView(
-            message:
-                error is ApiException ? error.message : error.toString(),
+            message: error is ApiException ? error.message : error.toString(),
             onRetry: () => setState(() => _routeFuture = _loadRoute()),
           );
         }
@@ -501,8 +497,8 @@ class _RouteTabState extends State<_RouteTab> {
                   title: Row(
                     children: [
                       Expanded(
-                        child: Text(
-                            route.stops[i].types.map(pretty).join(', ')),
+                        child:
+                            Text(route.stops[i].types.map(pretty).join(', ')),
                       ),
                       TypeDots(route.stops[i].types),
                     ],
@@ -606,21 +602,45 @@ class _CollectTabState extends State<_CollectTab> {
   bool _busy = false;
   CollectResult? _result;
 
-  /// Last preview and the radius it was computed for. Cleared whenever the
-  /// position or radius changes so it never describes stale inputs.
+  /// Last preview, the radius it was computed for, and the center it was
+  /// computed around. Cleared whenever the position or radius changes so it
+  /// never describes stale inputs; the center pins candidate distances to
+  /// the previewed point even if GPS arrives late.
   List<GarbagePost>? _preview;
   double? _previewRadius;
+  GeoPoint? _previewCenter;
   bool _previewBusy = false;
+
+  /// The active run for the progress header. Reloaded after every collect
+  /// so remaining stops and counts stay live.
+  late Future<PlannedRoute?> _planFuture;
 
   @override
   void initState() {
     super.initState();
     _radius.addListener(_clearPreview);
+    _planFuture = _loadPlan();
     _prefillGps();
   }
 
+  Future<PlannedRoute?> _loadPlan() =>
+      context.read<AuthProvider>().trucks.getPlannedRoute(widget.truck.id);
+
+  void _reloadPlan() {
+    if (!mounted) return;
+    setState(() => _planFuture = _loadPlan());
+  }
+
   void _clearPreview() {
-    if (_preview != null) setState(() => _preview = null);
+    // Always rebuilds: the coverage circle tracks the radius text live.
+    setState(() => _preview = null);
+  }
+
+  /// Radius for display layers. Pure (no error toast): invalid text simply
+  /// hides the coverage circle until it parses again.
+  double? _displayRadius() {
+    final radius = double.tryParse(_radius.text.trim());
+    return radius != null && radius > 0 ? radius : null;
   }
 
   /// Starts the position at the collector's live fix, which is fresher than
@@ -632,8 +652,8 @@ class _CollectTabState extends State<_CollectTab> {
       final locate = widget.positionProvider ?? requestCurrentPosition;
       final position = await locate();
       if (!mounted || _point != null) return;
-      setState(() => _point = GeoPoint(
-          longitude: position.longitude, latitude: position.latitude));
+      setState(() => _point =
+          GeoPoint(longitude: position.longitude, latitude: position.latitude));
     } catch (_) {
       // Empty position: the collect uses the truck location.
     }
@@ -645,12 +665,18 @@ class _CollectTabState extends State<_CollectTab> {
     super.dispose();
   }
 
-  Future<void> _previewCandidates() async {
+  double? _parseRadius() {
     final radius = double.tryParse(_radius.text.trim());
     if (radius == null || radius <= 0) {
       showError(context, 'Enter a valid radius in meters');
-      return;
+      return null;
     }
+    return radius;
+  }
+
+  Future<void> _previewCandidates() async {
+    final radius = _parseRadius();
+    if (radius == null) return;
     setState(() {
       _previewBusy = true;
       _preview = null;
@@ -666,6 +692,7 @@ class _CollectTabState extends State<_CollectTab> {
         setState(() {
           _preview = posts;
           _previewRadius = radius;
+          _previewCenter = _point ?? widget.truck.currentLocation;
         });
       }
     } catch (e) {
@@ -675,27 +702,39 @@ class _CollectTabState extends State<_CollectTab> {
     }
   }
 
-  Future<void> _collect() async {
-    final radius = double.tryParse(_radius.text.trim());
-    if (radius == null || radius <= 0) {
-      showError(context, 'Enter a valid radius in meters');
-      return;
-    }
+  Future<void> _collect() => _runCollect(
+        longitude: _point?.longitude,
+        latitude: _point?.latitude,
+      );
+
+  /// Collects around one candidate post with the current radius: the
+  /// standard vicinity collect, centered on the post instead of the
+  /// collector. Nearby posts inside the radius come along, exactly as if
+  /// the collector had stood there and collected.
+  Future<void> _collectAt(GarbagePost post) => _runCollect(
+        longitude: post.location.longitude,
+        latitude: post.location.latitude,
+      );
+
+  Future<void> _runCollect({double? longitude, double? latitude}) async {
+    final radius = _parseRadius();
+    if (radius == null) return;
     setState(() {
       _busy = true;
       _result = null;
     });
     try {
       final result = await context.read<AuthProvider>().trucks.collectVicinity(
-                widget.truck.id,
-                longitude: _point?.longitude,
-                latitude: _point?.latitude,
-                radiusMeters: radius,
-              );
+            widget.truck.id,
+            longitude: longitude,
+            latitude: latitude,
+            radiusMeters: radius,
+          );
       if (mounted) {
         setState(() {
           _result = result;
           _preview = null;
+          _planFuture = _loadPlan();
         });
         widget.onChanged();
       }
@@ -704,6 +743,105 @@ class _CollectTabState extends State<_CollectTab> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Read-only reference layers for the position map: the assigned route
+  /// line, numbered remaining stops in run order, collection points,
+  /// depots, and preview candidates not already on the route. Candidates
+  /// stay plain pins so scheduled (numbered) vs unscheduled (plain) reads
+  /// at a glance; the tapped collect center keeps the picked pin on top.
+  /// Without a position the collect falls back to the truck location, so
+  /// that fallback shows as the truck pin instead.
+  ({List<List<GeoPoint>> lines, List<MapMarkerData> markers}) _mapOverlays(
+      PlannedRoute? route) {
+    final scheme = Theme.of(context).colorScheme;
+    final brightness = scheme.brightness;
+    final markers = <MapMarkerData>[];
+    final lines = <List<GeoPoint>>[];
+    final stopIds = <String>{};
+    if (route != null) {
+      lines.add(route.displayLine);
+      markers.add(MapMarkerData(
+        point: route.origin,
+        icon: Icons.trip_origin,
+        color: scheme.primary,
+        label: 'Origin',
+      ));
+      for (var i = 0; i < route.stops.length; i++) {
+        final stop = route.stops[i];
+        stopIds.add(stop.postId);
+        markers.add(MapMarkerData(
+          point: stop.location,
+          number: i + 1,
+          color: stop.types.isEmpty
+              ? scheme.primary
+              : garbageTypeColor(stop.types.first, brightness),
+          label: 'Stop ${i + 1}: ${stop.types.map(pretty).join(', ')}',
+        ));
+      }
+      for (final point in route.collectionPoints) {
+        markers.add(MapMarkerData(
+          point: point,
+          icon: Icons.flag,
+          color: scheme.tertiary,
+          label: 'Collection point',
+        ));
+      }
+      for (final depot in route.depots) {
+        markers.add(MapMarkerData(
+          point: depot.location,
+          icon: Icons.home_work,
+          color: scheme.secondary,
+          label: 'Depot: ${depot.name}',
+        ));
+      }
+    }
+    if (_point == null) {
+      final truckAt = widget.truck.currentLocation;
+      if (truckAt != null) {
+        markers.add(MapMarkerData(
+          point: truckAt,
+          icon: Icons.local_shipping,
+          color: Colors.blue,
+          label: 'Truck location',
+        ));
+      }
+    }
+    for (final post in _preview ?? const <GarbagePost>[]) {
+      if (stopIds.contains(post.id)) continue;
+      final district = post.district?.trim();
+      markers.add(MapMarkerData(
+        point: post.location,
+        icon: Icons.location_on,
+        color: post.types.isEmpty
+            ? scheme.primary
+            : garbageTypeColor(post.types.first, brightness),
+        label: [
+          post.types.map(pretty).join(', '),
+          if (district != null && district.isNotEmpty) district,
+        ].join(' · '),
+      ));
+    }
+    return (lines: lines, markers: markers);
+  }
+
+  /// Preview posts nearest-first with live distances to the preview
+  /// center. Entries without a known center keep API order and show no
+  /// distance.
+  List<({GarbagePost post, double? meters})> _sortedPreview() {
+    final center = _previewCenter;
+    final entries = [
+      for (final post in _preview!)
+        (
+          post: post,
+          meters: center == null ? null : metersBetween(center, post.location),
+        ),
+    ];
+    entries.sort((a, b) {
+      if (a.meters == null || b.meters == null) return 0;
+      return a.meters!.compareTo(b.meters!);
+    });
+    return entries;
   }
 
   @override
@@ -725,6 +863,12 @@ class _CollectTabState extends State<_CollectTab> {
           ),
           const SizedBox(height: 12),
         ],
+        _RunProgress(
+          planFuture: _planFuture,
+          position: _point ?? widget.truck.currentLocation,
+          onRetry: _reloadPlan,
+        ),
+        const SizedBox(height: 12),
         Text(
           'Marks posted garbage near a point as collected. Starts at your current location; clear it to use the truck location instead.',
           style: Theme.of(context).textTheme.bodyMedium,
@@ -744,15 +888,30 @@ class _CollectTabState extends State<_CollectTab> {
           ],
         ),
         const SizedBox(height: 8),
-        LocationMapPicker(
-          onChanged: (point) => setState(() {
-            _point = point;
-            _preview = null;
-          }),
-          initial: _point,
-          fallbackCenter: viewport.center,
-          fallbackZoom: viewport.zoom,
-          tileProvider: widget.tileProvider,
+        // Shares the progress header's plan future: while it loads the
+        // map is still tappable, just without the route layers.
+        FutureBuilder(
+          future: _planFuture,
+          builder: (context, snapshot) {
+            final overlays = _mapOverlays(snapshot.data);
+            final center = _point ?? widget.truck.currentLocation;
+            final radius = _displayRadius();
+            return LocationMapPicker(
+              onChanged: (point) => setState(() {
+                _point = point;
+                _preview = null;
+              }),
+              initial: _point,
+              fallbackCenter: viewport.center,
+              fallbackZoom: viewport.zoom,
+              tileProvider: widget.tileProvider,
+              polylines: overlays.lines,
+              extraMarkers: overlays.markers,
+              coverageCircle: center == null || radius == null
+                  ? null
+                  : (center: center, radiusMeters: radius),
+            );
+          },
         ),
         const SizedBox(height: 12),
         TextField(
@@ -784,7 +943,13 @@ class _CollectTabState extends State<_CollectTab> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 8),
-          for (final post in _preview!) PostCard(post: post),
+          for (final entry in _sortedPreview())
+            _CandidateTile(
+              post: entry.post,
+              meters: entry.meters,
+              enabled: !_busy && !widget.assignedGuarded,
+              onCollect: () => _collectAt(entry.post),
+            ),
         ],
         const SizedBox(height: 12),
         FilledButton(
@@ -823,4 +988,147 @@ class _CollectTabState extends State<_CollectTab> {
   }
 }
 
+/// Run progress header for the collect tab: collected-vs-total count with
+/// a progress bar, plus the nearest remaining stop with a live distance to
+/// the collector's position. Distances recompute client-side (stop
+/// distances from planning time go stale as the truck moves); without a
+/// known position the next stop shows with no distance.
+class _RunProgress extends StatelessWidget {
+  const _RunProgress({
+    required this.planFuture,
+    required this.position,
+    required this.onRetry,
+  });
 
+  final Future<PlannedRoute?> planFuture;
+  final GeoPoint? position;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder(
+      future: planFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SizedBox.shrink();
+        }
+        if (snapshot.hasError) {
+          return Card(
+            margin: EdgeInsets.zero,
+            child: ListTile(
+              leading: Icon(
+                Icons.error_outline,
+                color: theme.colorScheme.error,
+              ),
+              title: const Text("Couldn't load the run"),
+              trailing: TextButton(
+                onPressed: onRetry,
+                child: const Text('Retry'),
+              ),
+            ),
+          );
+        }
+        final route = snapshot.data;
+        if (route == null) {
+          return Card(
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'No active run for this truck. Collects outside a run still work.',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+          );
+        }
+        final remaining = route.stops.length;
+        final total = route.totalStops;
+        final done = total == null ? null : (total - remaining).clamp(0, total);
+        final headline = total == null
+            ? (remaining == 0
+                ? 'Run complete'
+                : '$remaining ${remaining == 1 ? 'stop' : 'stops'} to go')
+            : (remaining == 0
+                ? 'All $total collected'
+                : 'Collected $done of $total');
+        var next = remaining > 0 ? route.stops.first : null;
+        double? nextMeters;
+        final center = position;
+        if (next != null && center != null) {
+          next = route.stops.reduce((a, b) =>
+              metersBetween(center, a.location) <=
+                      metersBetween(center, b.location)
+                  ? a
+                  : b);
+          nextMeters = metersBetween(center, next.location);
+        }
+        final nextStop = next;
+        return Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Run progress', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Text(headline, style: theme.textTheme.bodyLarge),
+                if (total != null && total > 0) ...[
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: done! / total),
+                ],
+                if (nextStop != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Next: ${nextStop.types.map(pretty).join(', ')}'
+                    '${nextMeters != null ? ' · ${formatDistance(nextMeters)}' : ''}',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// One preview candidate: types, district, live distance, and a Collect
+/// button that runs the standard vicinity collect centered on the post.
+class _CandidateTile extends StatelessWidget {
+  const _CandidateTile({
+    required this.post,
+    required this.meters,
+    required this.enabled,
+    required this.onCollect,
+  });
+
+  final GarbagePost post;
+  final double? meters;
+  final bool enabled;
+  final VoidCallback onCollect;
+
+  @override
+  Widget build(BuildContext context) {
+    final district = post.district?.trim();
+    return Card(
+      child: ListTile(
+        leading: TypeDots(post.types),
+        title: Text(post.types.map(pretty).join(', ')),
+        subtitle: Text(
+          [
+            if (meters != null) formatDistance(meters!),
+            pretty(post.status),
+            if (district != null && district.isNotEmpty) district,
+          ].join(' · '),
+        ),
+        trailing: FilledButton.tonal(
+          onPressed: enabled ? onCollect : null,
+          child: const Text('Collect'),
+        ),
+      ),
+    );
+  }
+}

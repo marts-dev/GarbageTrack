@@ -330,4 +330,23 @@ void main() {
     expect(route.depotIds, isEmpty);
     expect(route.collectionPoints, isEmpty);
   });
+
+  test('PlannedRoute parses total_stops and tolerates its absence', () {
+    PlannedRoute routeWith(Object? total) => PlannedRoute.fromJson({
+          'id': 'r1',
+          'truck_id': 't1',
+          'name': 'Morning run',
+          'origin': {
+            'type': 'Point',
+            'coordinates': [3.37, 6.45]
+          },
+          'stops': [],
+          'status': 'assigned',
+          if (total != null) 'total_stops': total,
+          'created_at': '2026-10-29T00:00:00Z',
+          'depot_ids': [],
+        });
+    expect(routeWith(8).totalStops, 8);
+    expect(routeWith(null).totalStops, isNull);
+  });
 }

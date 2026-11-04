@@ -14,6 +14,17 @@ extension LatLngGeoPoint on LatLng {
   GeoPoint get geoPoint => GeoPoint(longitude: longitude, latitude: latitude);
 }
 
+/// Great-circle distance in meters between two points.
+double metersBetween(GeoPoint a, GeoPoint b) =>
+    const Distance()(a.latLng, b.latLng);
+
+/// '40 m' below a kilometer, '1.2 km' above (whole kilometers past 10).
+String formatDistance(double meters) {
+  if (meters < 1000) return '${meters.round()} m';
+  final km = meters / 1000;
+  return '${km.toStringAsFixed(km < 10 ? 1 : 0)} km';
+}
+
 /// Ray-casting point-in-polygon test (longitude = x, latitude = y).
 ///
 /// Returns true for points strictly inside [ring] and for points on an edge

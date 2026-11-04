@@ -18,7 +18,12 @@ const userRoles = ['resident', 'collector', 'logistics', 'depot', 'admin'];
 const facilityKinds = ['dump_site', 'recycling', 'waste_center'];
 
 const truckAvailabilities = ['available', 'working'];
-const garbageStatuses = ['posted', 'scheduled', 'pending_confirmation', 'collected'];
+const garbageStatuses = [
+  'posted',
+  'scheduled',
+  'pending_confirmation',
+  'collected'
+];
 const routeStatuses = ['assigned', 'in_progress', 'done', 'cancelled'];
 
 String pretty(String value) => value
@@ -44,7 +49,8 @@ class GeoPoint {
         'coordinates': [longitude, latitude],
       };
 
-  String get short => '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}';
+  String get short =>
+      '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}';
 }
 
 /// Parses a GeoJSON LineString geometry (`{"type": "LineString",
@@ -133,7 +139,8 @@ class UserLocation {
   final GeoPoint location;
   final DateTime updatedAt;
 
-  UserLocation({required this.userId, required this.location, required this.updatedAt});
+  UserLocation(
+      {required this.userId, required this.location, required this.updatedAt});
 
   factory UserLocation.fromJson(Map<String, dynamic> json) => UserLocation(
         userId: json['user_id'] as String,
@@ -228,7 +235,8 @@ class Truck {
             (json['garbage_types'] as List).map((e) => e as String).toList(),
         currentLocation: json['current_location'] == null
             ? null
-            : GeoPoint.fromJson(json['current_location'] as Map<String, dynamic>),
+            : GeoPoint.fromJson(
+                json['current_location'] as Map<String, dynamic>),
         etaMinutes: (json['eta_minutes'] as num?)?.toInt(),
         capacity: (json['capacity'] as num?)?.toInt(),
         load: (json['load'] as num?)?.toInt() ?? 0,
@@ -297,7 +305,8 @@ class CollectionRoute {
     this.geometrySource = 'straight',
   });
 
-  factory CollectionRoute.fromJson(Map<String, dynamic> json) => CollectionRoute(
+  factory CollectionRoute.fromJson(Map<String, dynamic> json) =>
+      CollectionRoute(
         truckId: json['truck_id'] as String,
         origin: GeoPoint.fromJson(json['origin'] as Map<String, dynamic>),
         remainingCapacity: (json['remaining_capacity'] as num?)?.toInt(),
@@ -420,6 +429,11 @@ class PlannedRoute {
   /// scheduled dates; the API always sends one now.
   final DateTime? scheduledFor;
 
+  /// Stop count before collected stops were filtered out. Only the truck
+  /// planned-route endpoint sends it; null everywhere else (including
+  /// legacy payloads), in which case only the remaining count is known.
+  final int? totalStops;
+
   PlannedRoute({
     required this.id,
     required this.truckId,
@@ -433,6 +447,7 @@ class PlannedRoute {
     this.geometry,
     this.geometrySource = 'straight',
     this.scheduledFor,
+    this.totalStops,
   });
 
   factory PlannedRoute.fromJson(Map<String, dynamic> json) => PlannedRoute(
@@ -444,10 +459,9 @@ class PlannedRoute {
             .map((e) => PlannedStop.fromJson(e as Map<String, dynamic>))
             .toList(),
         status: json['status'] as String,
-        depotIds: (json['depot_ids'] as List?)
-                ?.map((e) => e as String)
-                .toList() ??
-            const [],
+        depotIds:
+            (json['depot_ids'] as List?)?.map((e) => e as String).toList() ??
+                const [],
         depots: (json['depots'] as List?)
                 ?.map((e) => Facility.fromJson(e as Map<String, dynamic>))
                 .toList() ??
@@ -459,6 +473,7 @@ class PlannedRoute {
         geometry: lineStringFromJson(json['geometry']),
         geometrySource: json['geometry_source'] as String? ?? 'straight',
         scheduledFor: tryParseDay(json['scheduled_for']),
+        totalStops: (json['total_stops'] as num?)?.toInt(),
       );
 
   /// Points to draw: road geometry when usable, else origin + stops.
@@ -485,10 +500,13 @@ class GarbageSummary {
 
   factory GarbageSummary.fromJson(Map<String, dynamic> json) => GarbageSummary(
         total: (json['total'] as num).toInt(),
-        byStatus: (json['by_status'] as Map).map((k, v) => MapEntry(k as String, (v as num).toInt())),
-        byType: (json['by_type'] as Map).map((k, v) => MapEntry(k as String, (v as num).toInt())),
+        byStatus: (json['by_status'] as Map)
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
+        byType: (json['by_type'] as Map)
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
         byRegion: ((json['by_region'] as Map?) ?? const {}).map(
-          (k, v) => MapEntry(k as String, RegionSummary.fromJson(v as Map<String, dynamic>)),
+          (k, v) => MapEntry(
+              k as String, RegionSummary.fromJson(v as Map<String, dynamic>)),
         ),
       );
 }
@@ -507,10 +525,10 @@ class RegionSummary {
 
   factory RegionSummary.fromJson(Map<String, dynamic> json) => RegionSummary(
         total: (json['total'] as num).toInt(),
-        byStatus: ((json['by_status'] as Map?) ?? const {}).map(
-            (k, v) => MapEntry(k as String, (v as num).toInt())),
-        byType: ((json['by_type'] as Map?) ?? const {}).map(
-            (k, v) => MapEntry(k as String, (v as num).toInt())),
+        byStatus: ((json['by_status'] as Map?) ?? const {})
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
+        byType: ((json['by_type'] as Map?) ?? const {})
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
       );
 }
 
@@ -571,8 +589,7 @@ class ScheduledPickup {
   factory ScheduledPickup.fromJson(Map<String, dynamic> json) =>
       ScheduledPickup(
         postId: json['post_id'] as String,
-        types:
-            (json['types'] as List).map((e) => e as String).toList(),
+        types: (json['types'] as List).map((e) => e as String).toList(),
         status: json['status'] as String,
         district: json['district'] as String?,
         routeId: json['route_id'] as String,

@@ -768,6 +768,7 @@ def test_truck_planned_route_filters_collected_stops(client, dispatcher, make_us
         f"/api/v1/trucks/{truck['id']}/planned-route", headers=collector["headers"]
     )
     assert len(before.json()["stops"]) == 2
+    assert before.json()["total_stops"] == 2
 
     collected = client.post(
         f"/api/v1/trucks/{truck['id']}/collect-vicinity",
@@ -781,3 +782,5 @@ def test_truck_planned_route_filters_collected_stops(client, dispatcher, make_us
     )
     assert after.status_code == 200
     assert after.json()["stops"] == []
+    # The total survives filtering so collectors see run progress.
+    assert after.json()["total_stops"] == 2

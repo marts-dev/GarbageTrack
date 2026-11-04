@@ -18,6 +18,7 @@ import 'package:garbagetrack/state/auth_provider.dart';
 import 'package:garbagetrack/utils/dates.dart';
 import 'package:garbagetrack/utils/geo.dart';
 import 'package:garbagetrack/widgets/geo_map.dart';
+import 'package:garbagetrack/widgets/location_picker.dart';
 import 'package:garbagetrack/widgets/route_preview.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -103,16 +104,16 @@ Map<String, dynamic> _collectionRouteJson({
       'remaining_capacity': 2,
       'stops': [
         if (!emptyStops)
-        {
-          'post_id': 'p1',
-          'location': {
-            'type': 'Point',
-            'coordinates': [3.38, 6.46]
+          {
+            'post_id': 'p1',
+            'location': {
+              'type': 'Point',
+              'coordinates': [3.38, 6.46]
+            },
+            'types': ['plastic'],
+            'status': 'posted',
+            'distance_meters': 100.0,
           },
-          'types': ['plastic'],
-          'status': 'posted',
-          'distance_meters': 100.0,
-        },
       ],
       'geometry': geometry == null
           ? null
@@ -128,6 +129,7 @@ Map<String, dynamic> _collectionRouteJson({
 Map<String, dynamic> _plannedTruckRouteJson({
   List<List<double>>? geometry,
   bool emptyStops = false,
+  int? totalStops = 3,
 }) =>
     {
       'id': 'r1',
@@ -151,6 +153,7 @@ Map<String, dynamic> _plannedTruckRouteJson({
       ],
       'status': 'assigned',
       'scheduled_for': '2026-12-25',
+      if (totalStops != null) 'total_stops': totalStops,
       'created_at': '2026-10-29T00:00:00Z',
       'depot_ids': ['f1'],
       'depots': [
@@ -406,8 +409,8 @@ void main() {
         httpClient: MockClient((_) async => http.Response(
               jsonEncode(
                   {'detail': 'collector already assigned to another truck'}),
-          409,
-        )),
+              409,
+            )),
       ));
       expect(
         conflicted.updateTruck('t1', operatorId: 'u2', operatorIdSet: true),
@@ -433,9 +436,9 @@ void main() {
       TruckApi apiFor(int status, String detail) => TruckApi(ApiClient(
             baseUrl: 'http://x',
             httpClient: MockClient((_) async => http.Response(
-              jsonEncode({'detail': detail}),
-              status,
-            )),
+                  jsonEncode({'detail': detail}),
+                  status,
+                )),
           ));
       expect(
         apiFor(404, 'operator user not found')
@@ -464,9 +467,9 @@ void main() {
       TruckApi apiFor(int status, String detail) => TruckApi(ApiClient(
             baseUrl: 'http://x',
             httpClient: MockClient((_) async => http.Response(
-              jsonEncode({'detail': detail}),
-              status,
-            )),
+                  jsonEncode({'detail': detail}),
+                  status,
+                )),
           ));
       expect(
         apiFor(409, 'truck has assigned routes').deleteTruck('t1'),
@@ -493,9 +496,9 @@ void main() {
       final missing = LogisticsApi(ApiClient(
         baseUrl: 'http://x',
         httpClient: MockClient((_) async => http.Response(
-          jsonEncode({'detail': 'route not found'}),
-          404,
-        )),
+              jsonEncode({'detail': 'route not found'}),
+              404,
+            )),
       ));
       expect(
         missing.deleteRoute('nope'),
@@ -711,24 +714,26 @@ void main() {
       bool plannedEmptiesOnRefetch = false,
       bool plannedEmptyStops = false,
       bool noPlannedRoute = false,
+      int? planTotalStops = 3,
+      Map<String, dynamic>? collectBody,
     }) {
       var routeCalls = 0;
       var shared = false;
       return MockClient((request) async {
-          final path = request.url.path;
-          calls.add('${request.method} $path');
-          if (request.method == 'GET' && path == '/api/v1/trucks/t1') {
-            return http.Response(
+        final path = request.url.path;
+        calls.add('${request.method} $path');
+        if (request.method == 'GET' && path == '/api/v1/trucks/t1') {
+          return http.Response(
             jsonEncode(_truckJson('t1', 'AAA-1',
                 operatorId: operators['t1'],
                 availability: truckAvailability,
                 location:
                     shared ? sharedLocation ?? truckLocation : truckLocation)),
-              200,
-            );
-          }
-          if (request.method == 'GET' &&
-              path == '/api/v1/trucks/t1/planned-route') {
+            200,
+          );
+        }
+        if (request.method == 'GET' &&
+            path == '/api/v1/trucks/t1/planned-route') {
           routeCalls++;
           if (noPlannedRoute) {
             return http.Response(
@@ -739,35 +744,54 @@ void main() {
           return http.Response(
               jsonEncode(_plannedTruckRouteJson(
                 geometry: geometry,
-                emptyStops:
-                    plannedEmptyStops || (plannedEmptiesOnRefetch && routeCalls > 1),
+                emptyStops: plannedEmptyStops ||
+                    (plannedEmptiesOnRefetch && routeCalls > 1),
+                totalStops: planTotalStops,
               )),
               200);
+        }
+        if (request.method == 'POST' &&
+            path == '/api/v1/trucks/t1/collect-vicinity') {
+          if (request.body.isNotEmpty) {
+            collectBody
+                ?.addAll(jsonDecode(request.body) as Map<String, dynamic>);
           }
-          if (request.method == 'GET' &&
-              path == '/api/v1/trucks/t1/collect-candidates') {
+          return http.Response(
+            jsonEncode({
+              'truck_id': 't1',
+              'collected_count': 1,
+              'post_ids': ['p2'],
+              'load': 1,
+              'capacity': 10,
+              'availability': 'working',
+            }),
+            200,
+          );
+        }
+        if (request.method == 'GET' &&
+            path == '/api/v1/trucks/t1/collect-candidates') {
+          return http.Response(
+            jsonEncode([
+              _postJson('p1', 3.38, 6.46, 'Ojota'),
+              _postJson('p2', 3.381, 6.461, 'Ikeja'),
+            ]),
+            200,
+          );
+        }
+        if (request.method == 'POST' &&
+            path == '/api/v1/trucks/t1/finish-route') {
+          if (finishStatus != 200) {
             return http.Response(
-              jsonEncode([
-                _postJson('p1', 3.38, 6.46, 'Ojota'),
-                _postJson('p2', 3.381, 6.461, 'Ikeja'),
-              ]),
-              200,
+              jsonEncode({'detail': 'truck is not assigned to you'}),
+              finishStatus,
             );
           }
-          if (request.method == 'POST' &&
-              path == '/api/v1/trucks/t1/finish-route') {
-            if (finishStatus != 200) {
-              return http.Response(
-                jsonEncode({'detail': 'truck is not assigned to you'}),
-                finishStatus,
-              );
-            }
-            return http.Response(
-              jsonEncode(_truckJson('t1', 'AAA-1',
-                  operatorId: operators['t1'], availability: 'available')),
-              200,
-            );
-          }
+          return http.Response(
+            jsonEncode(_truckJson('t1', 'AAA-1',
+                operatorId: operators['t1'], availability: 'available')),
+            200,
+          );
+        }
         if (request.method == 'POST' &&
             path == '/api/v1/trucks/t1/location' &&
             sharedLocation != null) {
@@ -778,8 +802,8 @@ void main() {
             200,
           );
         }
-          return http.Response('not found', 404);
-        });
+        return http.Response('not found', 404);
+      });
     }
 
     AuthProvider detailAuth(
@@ -793,6 +817,8 @@ void main() {
       bool plannedEmptiesOnRefetch = false,
       bool plannedEmptyStops = false,
       bool noPlannedRoute = false,
+      int? planTotalStops = 3,
+      Map<String, dynamic>? collectBody,
     }) =>
         AuthProvider.withUser(
           _user('collector'),
@@ -809,6 +835,8 @@ void main() {
               plannedEmptiesOnRefetch: plannedEmptiesOnRefetch,
               plannedEmptyStops: plannedEmptyStops,
               noPlannedRoute: noPlannedRoute,
+              planTotalStops: planTotalStops,
+              collectBody: collectBody,
             ),
           ),
         );
@@ -1009,7 +1037,9 @@ void main() {
       );
       await tester.tap(find.text('Collect'));
       await tester.pumpAndSettle();
-      // The clear action sits above the map; assert before scrolling down.
+      // The progress header pushes the position row below the fold, so
+      // scroll it into view (this also builds it) before asserting.
+      await _scrollTo(tester, find.text('Use truck location'));
       expect(find.text('Use truck location'), findsOneWidget);
       await _scrollTo(tester, find.text('Picked: 9.9000, 9.9000'));
       expect(find.text('Picked: 9.9000, 9.9000'), findsOneWidget);
@@ -1044,8 +1074,7 @@ void main() {
       expect(find.text('Use truck location'), findsNothing);
     });
 
-    testWidgets('preview shows nearby posts before collecting',
-        (tester) async {
+    testWidgets('preview shows nearby posts before collecting', (tester) async {
       final calls = <String>[];
       await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
       await tester.tap(find.text('Collect'));
@@ -1060,6 +1089,302 @@ void main() {
       expect(
         calls,
         contains('GET /api/v1/trucks/t1/collect-candidates'),
+      );
+    });
+
+    testWidgets('collect tab shows run progress with live distance',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, truckLocation: [3.37, 6.45]),
+        positionProvider: () async => throw StateError('denied'),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      expect(find.text('Run progress'), findsOneWidget);
+      // One remaining stop of three: two collected.
+      expect(find.text('Collected 2 of 3'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      final expected = formatDistance(metersBetween(
+        GeoPoint(longitude: 3.37, latitude: 6.45),
+        GeoPoint(longitude: 3.38, latitude: 6.46),
+      ));
+      expect(find.text('Next: Plastic · $expected'), findsOneWidget);
+    });
+
+    testWidgets('progress falls back without total or position',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, planTotalStops: null),
+        positionProvider: () async => throw StateError('denied'),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      expect(find.text('1 stop to go'), findsOneWidget);
+      expect(find.text('Next: Plastic'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+    });
+
+    testWidgets('progress shows the no-run state without a plan',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, noPlannedRoute: true),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+            'No active run for this truck. Collects outside a run still work.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('candidates sort nearest-first with per-post collect',
+        (tester) async {
+      final calls = <String>[];
+      final collectBody = <String, dynamic>{};
+      Position gps() => Position(
+            longitude: 3.381,
+            latitude: 6.461,
+            timestamp: DateTime.fromMillisecondsSinceEpoch(0),
+            accuracy: 5,
+            altitude: 0,
+            altitudeAccuracy: 0,
+            heading: 0,
+            headingAccuracy: 0,
+            speed: 0,
+            speedAccuracy: 0,
+          );
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, collectBody: collectBody),
+        positionProvider: () async => gps(),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.text('Preview nearby'));
+      await tester.tap(find.text('Preview nearby'));
+      await tester.pumpAndSettle();
+      // The fix sits exactly on Ikeja; Ojota is ~160 m off and sorts last.
+      final ojotaMeters = formatDistance(metersBetween(
+        GeoPoint(longitude: 3.381, latitude: 6.461),
+        GeoPoint(longitude: 3.38, latitude: 6.46),
+      ));
+      // Scroll the last tile into view first: the list builds lazily, so
+      // the Ojota subtitle does not exist until it is on screen.
+      await _scrollTo(tester, find.textContaining('Ojota'));
+      expect(find.text('0 m · Posted · Ikeja'), findsOneWidget);
+      expect(
+        find.text('$ojotaMeters · Posted · Ojota'),
+        findsOneWidget,
+      );
+      final ikejaDy = tester.getCenter(find.textContaining('Ikeja')).dy;
+      final ojotaDy = tester.getCenter(find.textContaining('Ojota')).dy;
+      expect(ikejaDy, lessThan(ojotaDy));
+
+      // One tap collects around the Ikeja post with the current radius.
+      final tile = find.ancestor(
+        of: find.textContaining('Ikeja'),
+        matching: find.byType(Card),
+      );
+      await _scrollTo(tester, tile);
+      await tester.tap(find.descendant(
+        of: tile,
+        matching: find.widgetWithText(FilledButton, 'Collect'),
+      ));
+      await tester.pumpAndSettle();
+      expect(collectBody['longitude'], 3.381);
+      expect(collectBody['latitude'], 6.461);
+      expect(collectBody['radius_meters'], 30);
+      expect(calls, contains('POST /api/v1/trucks/t1/collect-vicinity'));
+      // The preview clears and the result lands.
+      expect(find.text('2 posts within 30 m:'), findsNothing);
+      expect(find.text('Result'), findsOneWidget);
+    });
+
+    testWidgets('collect map shows the run line and numbered stops',
+        (tester) async {
+      Finder tip(String message) => find.descendant(
+            of: find.byType(LocationMapPicker),
+            matching: find.byWidgetPredicate(
+              (w) => w is Tooltip && w.message == message,
+            ),
+          );
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls),
+        positionProvider: () async => throw StateError('denied'),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.byType(LocationMapPicker));
+
+      // The one remaining stop renders numbered, in run order.
+      expect(find.byType(NumberedMapPin), findsOneWidget);
+      expect(tip('Stop 1: Plastic'), findsOneWidget);
+      expect(tip('Origin'), findsOneWidget);
+      expect(tip('Depot: North Depot'), findsOneWidget);
+      // Straight fallback: origin straight to the stop.
+      final layers = tester
+          .widgetList<PolylineLayer>(find.descendant(
+            of: find.byType(LocationMapPicker),
+            matching: find.byType(PolylineLayer),
+          ))
+          .toList();
+      expect(layers, hasLength(1));
+      expect(
+        layers.single.polylines.single.points,
+        [
+          GeoPoint(longitude: 3.37, latitude: 6.45).latLng,
+          GeoPoint(longitude: 3.38, latitude: 6.46).latLng,
+        ],
+      );
+    });
+
+    testWidgets('collect map marks only unscheduled candidates',
+        (tester) async {
+      Finder tip(String message) => find.descendant(
+            of: find.byType(LocationMapPicker),
+            matching: find.byWidgetPredicate(
+              (w) => w is Tooltip && w.message == message,
+            ),
+          );
+      Position gps() => Position(
+            longitude: 3.381,
+            latitude: 6.461,
+            timestamp: DateTime.fromMillisecondsSinceEpoch(0),
+            accuracy: 5,
+            altitude: 0,
+            altitudeAccuracy: 0,
+            heading: 0,
+            headingAccuracy: 0,
+            speed: 0,
+            speedAccuracy: 0,
+          );
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls),
+        positionProvider: () async => gps(),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.text('Preview nearby'));
+      await tester.tap(find.text('Preview nearby'));
+      await tester.pumpAndSettle();
+
+      // Ikeja is unscheduled: plain candidate pin. Ojota is stop 1, so it
+      // keeps only its numbered pin instead of doubling up.
+      await _scrollTo(tester, find.byType(LocationMapPicker));
+      expect(tip('Plastic · Ikeja'), findsOneWidget);
+      expect(tip('Plastic · Ojota'), findsNothing);
+      expect(find.byType(NumberedMapPin), findsOneWidget);
+      // A live position means no truck-fallback pin.
+      expect(tip('Truck location'), findsNothing);
+    });
+
+    testWidgets('collect map shows the truck fallback pin without a position',
+        (tester) async {
+      Finder tip(String message) => find.descendant(
+            of: find.byType(LocationMapPicker),
+            matching: find.byWidgetPredicate(
+              (w) => w is Tooltip && w.message == message,
+            ),
+          );
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, truckLocation: [3.35, 6.44]),
+        positionProvider: () async => throw StateError('denied'),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.byType(LocationMapPicker));
+      expect(tip('Truck location'), findsOneWidget);
+      // The run layers still render underneath.
+      expect(find.byType(NumberedMapPin), findsOneWidget);
+    });
+
+    testWidgets('collect map shows the live coverage circle', (tester) async {
+      CircleMarker circle() => tester
+          .widgetList<CircleLayer>(find.descendant(
+            of: find.byType(LocationMapPicker),
+            matching: find.byType(CircleLayer),
+          ))
+          .single
+          .circles
+          .single;
+      Position gps() => Position(
+            longitude: 3.381,
+            latitude: 6.461,
+            timestamp: DateTime.fromMillisecondsSinceEpoch(0),
+            accuracy: 5,
+            altitude: 0,
+            altitudeAccuracy: 0,
+            heading: 0,
+            headingAccuracy: 0,
+            speed: 0,
+            speedAccuracy: 0,
+          );
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls),
+        positionProvider: () async => gps(),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.byType(LocationMapPicker));
+
+      // Centered on the fix with the default 30 m radius.
+      expect(
+        circle().point,
+        GeoPoint(longitude: 3.381, latitude: 6.461).latLng,
+      );
+      expect(circle().radius, 30);
+
+      // Typing a new radius resizes the circle without previewing.
+      await _scrollTo(tester, find.byType(TextField));
+      await tester.enterText(find.byType(TextField), '50');
+      await tester.pumpAndSettle();
+      expect(circle().radius, 50);
+
+      // Invalid text hides the circle instead of erroring.
+      await tester.enterText(find.byType(TextField), 'abc');
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(LocationMapPicker),
+          matching: find.byType(CircleLayer),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('collect map hides the circle without a center',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls),
+        positionProvider: () async => throw StateError('denied'),
+      );
+      await tester.tap(find.text('Collect'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.byType(LocationMapPicker));
+      // No fix and the truck reports no location: nothing to center on.
+      expect(
+        find.descendant(
+          of: find.byType(LocationMapPicker),
+          matching: find.byType(CircleLayer),
+        ),
+        findsNothing,
       );
     });
 
@@ -1088,8 +1413,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(
-          calls, isNot(contains('POST /api/v1/trucks/t1/finish-route')));
+      expect(calls, isNot(contains('POST /api/v1/trucks/t1/finish-route')));
     });
 
     testWidgets('finish 403 surfaces the server detail', (tester) async {
@@ -1120,11 +1444,11 @@ void main() {
         tester,
         detailAuth({'t1': 'u1'}, calls,
             geometry: [
-          [3.37, 6.45],
-          [3.371, 6.451],
-          [3.375, 6.455],
-          [3.38, 6.46],
-        ]),
+              [3.37, 6.45],
+              [3.371, 6.451],
+              [3.375, 6.455],
+              [3.38, 6.46],
+            ]),
       );
       final layer = tester.widget<PolylineLayer>(find.byType(PolylineLayer));
       expect(layer.polylines, hasLength(1));
@@ -1471,8 +1795,7 @@ void main() {
       expect(submitted['scheduled_for'], toIsoDay(expected));
     });
 
-    testWidgets('last-selected depot is the labeled route end',
-        (tester) async {
+    testWidgets('last-selected depot is the labeled route end', (tester) async {
       final submitted = <String, dynamic>{};
       final auth = routeAuth(routeBackend(
         posts: [],
@@ -1597,8 +1920,7 @@ void main() {
 
       // Flipping back to auto keeps the pick but auto wins at submit.
       await _scrollTo(
-          tester,
-          find.widgetWithText(SwitchListTile, 'Auto-generate stops'));
+          tester, find.widgetWithText(SwitchListTile, 'Auto-generate stops'));
       await tester
           .tap(find.widgetWithText(SwitchListTile, 'Auto-generate stops'));
       await tester.pumpAndSettle();
@@ -1689,39 +2011,38 @@ void main() {
     }) {
       var usersCalls = 0;
       return MockClient((request) async {
-          final path = request.url.path;
-          calls.add('${request.method} $path');
-          if (request.method == 'GET' && path == '/api/v1/logistics/routes') {
-            return http.Response(jsonEncode(routes), 200);
+        final path = request.url.path;
+        calls.add('${request.method} $path');
+        if (request.method == 'GET' && path == '/api/v1/logistics/routes') {
+          return http.Response(jsonEncode(routes), 200);
+        }
+        if (request.method == 'GET' && path == '/api/v1/logistics/facilities') {
+          return http.Response(jsonEncode(facilities), 200);
+        }
+        if (request.method == 'GET' && path == '/api/v1/trucks/t1') {
+          if (truck == null) return http.Response('not found', 404);
+          return http.Response(jsonEncode(truck), 200);
+        }
+        if (request.method == 'GET' && path == '/api/v1/auth/users') {
+          usersCalls++;
+          if (usersCalls <= usersFailTimes) {
+            return http.Response(jsonEncode({'detail': 'boom'}), 500);
           }
-          if (request.method == 'GET' &&
-              path == '/api/v1/logistics/facilities') {
-            return http.Response(jsonEncode(facilities), 200);
+          return http.Response(jsonEncode(collectors), 200);
+        }
+        if (request.method == 'DELETE' &&
+            path == '/api/v1/logistics/routes/r1') {
+          if (deleteStatus != 204) {
+            return http.Response(
+              jsonEncode({'detail': 'route not found'}),
+              deleteStatus,
+            );
           }
-          if (request.method == 'GET' && path == '/api/v1/trucks/t1') {
-            if (truck == null) return http.Response('not found', 404);
-            return http.Response(jsonEncode(truck), 200);
-          }
-          if (request.method == 'GET' && path == '/api/v1/auth/users') {
-            usersCalls++;
-            if (usersCalls <= usersFailTimes) {
-              return http.Response(jsonEncode({'detail': 'boom'}), 500);
-            }
-            return http.Response(jsonEncode(collectors), 200);
-          }
-          if (request.method == 'DELETE' &&
-              path == '/api/v1/logistics/routes/r1') {
-            if (deleteStatus != 204) {
-              return http.Response(
-                jsonEncode({'detail': 'route not found'}),
-                deleteStatus,
-              );
-            }
-            routes.clear();
-            return http.Response('', 204);
-          }
-          return http.Response('not found', 404);
-        });
+          routes.clear();
+          return http.Response('', 204);
+        }
+        return http.Response('not found', 404);
+      });
     }
 
     AuthProvider logisticsAuth(
@@ -1897,8 +2218,8 @@ void main() {
             'updated_at': '2026-10-29T00:00:00Z',
           }
         ],
-        truck: _truckJson('t1', 'AAA-1',
-            operatorId: 'c1', location: [3.50, 6.60]),
+        truck:
+            _truckJson('t1', 'AAA-1', operatorId: 'c1', location: [3.50, 6.60]),
         collectors: [collectorJson('c1', 'Ada Collector')],
       );
       await openRoutesTab(tester, auth);

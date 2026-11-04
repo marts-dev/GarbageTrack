@@ -211,5 +211,124 @@ void main() {
       expect(picked, isNotNull);
       expect(find.textContaining('Picked:'), findsOneWidget);
     });
+
+    testWidgets('renders reference lines and markers under the pick',
+        (tester) async {
+      final initial = GeoPoint(longitude: 19.04, latitude: 47.49);
+      await tester.pumpWidget(
+        _wrap(
+          LocationMapPicker(
+            onChanged: (_) {},
+            initial: initial,
+            tileProvider: _StubTileProvider(),
+            polylines: [
+              [
+                GeoPoint(longitude: 19.04, latitude: 47.49),
+                GeoPoint(longitude: 19.0405, latitude: 47.4905),
+              ],
+              // Too short to draw.
+              [GeoPoint(longitude: 19.0406, latitude: 47.4906)],
+            ],
+            extraMarkers: [
+              MapMarkerData(
+                point: GeoPoint(longitude: 19.0405, latitude: 47.4905),
+                number: 1,
+                label: 'Stop 1: Plastic',
+              ),
+              MapMarkerData(
+                point: GeoPoint(longitude: 19.0406, latitude: 47.4906),
+                label: 'Depot: North',
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      final layers =
+          tester.widgetList<PolylineLayer>(find.byType(PolylineLayer)).toList();
+      expect(layers, hasLength(1));
+      expect(layers.single.polylines, hasLength(1));
+      expect(find.byType(NumberedMapPin), findsOneWidget);
+      expect(find.text('1', skipOffstage: false), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is Tooltip && w.message == 'Stop 1: Plastic',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is Tooltip && w.message == 'Depot: North',
+        ),
+        findsOneWidget,
+      );
+      // The picked pin stays on top of the reference pins.
+      expect(find.byType(MapPin), findsNWidgets(2));
+    });
+
+    testWidgets('renders the coverage circle in meters', (tester) async {
+      final center = GeoPoint(longitude: 19.04, latitude: 47.49);
+      await tester.pumpWidget(
+        _wrap(
+          LocationMapPicker(
+            onChanged: (_) {},
+            initial: center,
+            tileProvider: _StubTileProvider(),
+            coverageCircle: (center: center, radiusMeters: 30),
+          ),
+        ),
+      );
+      await tester.pump();
+      final layers =
+          tester.widgetList<CircleLayer>(find.byType(CircleLayer)).toList();
+      expect(layers, hasLength(1));
+      final circle = layers.single.circles.single;
+      expect(circle.point, center.latLng);
+      expect(circle.radius, 30);
+      expect(circle.useRadiusInMeter, isTrue);
+    });
+
+    testWidgets('draws no circle without coverage', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          LocationMapPicker(
+            onChanged: (_) {},
+            tileProvider: _StubTileProvider(),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(CircleLayer), findsNothing);
+    });
+
+    testWidgets('stays tappable with reference layers on', (tester) async {
+      GeoPoint? picked;
+      await tester.pumpWidget(
+        _wrap(
+          LocationMapPicker(
+            onChanged: (p) => picked = p,
+            tileProvider: _StubTileProvider(),
+            polylines: [
+              [
+                GeoPoint(longitude: 19.04, latitude: 47.49),
+                GeoPoint(longitude: 19.05, latitude: 47.50),
+              ],
+            ],
+            extraMarkers: [
+              MapMarkerData(
+                point: GeoPoint(longitude: 19.05, latitude: 47.50),
+                number: 1,
+                label: 'Stop 1',
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(FlutterMap));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pumpAndSettle();
+      expect(picked, isNotNull);
+    });
   });
 }

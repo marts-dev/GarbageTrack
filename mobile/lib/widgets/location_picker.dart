@@ -10,7 +10,9 @@ import 'geo_map.dart';
 /// Tap-to-pick OpenStreetMap location picker with a GPS button.
 ///
 /// Reports the picked point through [onChanged]. The map has a fixed
-/// [height] so it can live inside scrolling forms.
+/// [height] so it can live inside scrolling forms. Read-only reference
+/// layers ([polylines], [extraMarkers]) render underneath the picked pin
+/// and never affect picking.
 class LocationMapPicker extends StatefulWidget {
   const LocationMapPicker({
     super.key,
@@ -20,6 +22,9 @@ class LocationMapPicker extends StatefulWidget {
     this.tileProvider,
     this.fallbackCenter,
     this.fallbackZoom,
+    this.polylines = const [],
+    this.extraMarkers = const [],
+    this.coverageCircle,
   });
 
   final ValueChanged<GeoPoint?> onChanged;
@@ -37,6 +42,17 @@ class LocationMapPicker extends StatefulWidget {
   /// Overrides tile loading (e.g. an offline stub in widget tests).
   /// Defaults to the standard network tile provider.
   final TileProvider? tileProvider;
+
+  /// Read-only reference lines (e.g. the assigned route). Lines with fewer
+  /// than 2 points are skipped.
+  final List<List<GeoPoint>> polylines;
+
+  /// Read-only reference pins (e.g. route stops) under the picked pin.
+  final List<MapMarkerData> extraMarkers;
+
+  /// Translucent coverage circle (e.g. the collect radius around the
+  /// collect center). Null draws nothing.
+  final ({GeoPoint center, double radiusMeters})? coverageCircle;
 
   @override
   State<LocationMapPicker> createState() => _LocationMapPickerState();
@@ -101,7 +117,8 @@ class _LocationMapPickerState extends State<LocationMapPicker> {
   }
 
   void _fail(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -120,8 +137,9 @@ class _LocationMapPickerState extends State<LocationMapPicker> {
                 FlutterMap(
                   mapController: _controller,
                   options: MapOptions(
-                    initialCenter:
-                        picked?.latLng ?? widget.fallbackCenter ?? const LatLng(0, 0),
+                    initialCenter: picked?.latLng ??
+                        widget.fallbackCenter ??
+                        const LatLng(0, 0),
                     initialZoom: picked == null ? widget.fallbackZoom ?? 2 : 14,
                     interactionOptions: const InteractionOptions(
                       flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
@@ -135,8 +153,51 @@ class _LocationMapPickerState extends State<LocationMapPicker> {
                       userAgentPackageName: 'com.garbagetrack.garbagetrack',
                       tileProvider: widget.tileProvider,
                     ),
+                    if (widget.polylines.any((line) => line.length >= 2))
+                      PolylineLayer(
+                        polylines: [
+                          for (final line in widget.polylines)
+                            if (line.length >= 2)
+                              Polyline(
+                                points: line.map((p) => p.latLng).toList(),
+                                strokeWidth: 4,
+                                color: scheme.primary,
+                              ),
+                        ],
+                      ),
+                    if (widget.coverageCircle case final circle?)
+                      CircleLayer(
+                        circles: [
+                          CircleMarker(
+                            point: circle.center.latLng,
+                            radius: circle.radiusMeters,
+                            useRadiusInMeter: true,
+                            color: scheme.primary.withValues(alpha: 0.15),
+                            borderColor: scheme.primary.withValues(alpha: 0.5),
+                            borderStrokeWidth: 2,
+                          ),
+                        ],
+                      ),
                     MarkerLayer(
                       markers: [
+                        for (final extra in widget.extraMarkers)
+                          Marker(
+                            point: extra.point.latLng,
+                            width: 40,
+                            height: 40,
+                            child: Tooltip(
+                              message: extra.label ?? extra.point.short,
+                              child: extra.number != null
+                                  ? NumberedMapPin(
+                                      number: extra.number!,
+                                      color: extra.color ?? scheme.primary,
+                                    )
+                                  : MapPin(
+                                      icon: extra.icon,
+                                      color: extra.color ?? scheme.primary,
+                                    ),
+                            ),
+                          ),
                         if (picked != null)
                           Marker(
                             point: picked.latLng,

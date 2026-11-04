@@ -25,12 +25,17 @@ class MapMarkerData {
     this.color,
     this.label,
     this.clusterGroup,
+    this.number,
   });
 
   final GeoPoint point;
   final IconData icon;
   final Color? color;
   final String? label;
+
+  /// Stop order, rendered as a numbered badge instead of the icon pin
+  /// (e.g. route stops on the collect map). Null keeps the icon pin.
+  final int? number;
 
   /// Clustering bucket: pins only merge with pins in the same bucket.
   /// Null (the default) clusters with other ungrouped pins, preserving the
@@ -109,7 +114,8 @@ math.Point<double> _project(LatLng ll, double zoom) {
   final scale = 256.0 * math.pow(2, zoom).toDouble();
   final x = (ll.longitude + 180.0) / 360.0 * scale;
   final sinLat = math.sin(ll.latitude * math.pi / 180.0).clamp(-0.9999, 0.9999);
-  final y = (0.5 - math.log((1 + sinLat) / (1 - sinLat)) / (4 * math.pi)) * scale;
+  final y =
+      (0.5 - math.log((1 + sinLat) / (1 - sinLat)) / (4 * math.pi)) * scale;
   return math.Point(x, y);
 }
 
@@ -242,6 +248,38 @@ class _GarbageMapViewState extends State<GarbageMapView> {
     _controller.move(center, zoom);
   }
 
+  /// One unclustered pin: a numbered badge for ordered stops, else the
+  /// plain icon pin.
+  Marker _singleMarker(
+    ColorScheme scheme,
+    MarkerCluster cluster,
+    MapMarkerData marker,
+  ) {
+    final number = marker.number;
+    return Marker(
+      point: cluster.center,
+      width: 40,
+      height: 40,
+      child: _Tappable(
+        onTap: widget.onMarkerTap == null
+            ? null
+            : () => widget.onMarkerTap!(cluster.memberIndices.single),
+        child: Tooltip(
+          message: marker.label ?? marker.point.short,
+          child: number != null
+              ? NumberedMapPin(
+                  number: number,
+                  color: marker.color ?? scheme.primary,
+                )
+              : MapPin(
+                  icon: marker.icon,
+                  color: marker.color ?? scheme.primary,
+                ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -286,7 +324,9 @@ class _GarbageMapViewState extends State<GarbageMapView> {
               flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
             ),
             onMapEvent: _onMapEvent,
-            onTap: widget.onMapTap == null ? null : (_, ll) => widget.onMapTap!(ll),
+            onTap: widget.onMapTap == null
+                ? null
+                : (_, ll) => widget.onMapTap!(ll),
           ),
           children: [
             TileLayer(
@@ -321,24 +361,10 @@ class _GarbageMapViewState extends State<GarbageMapView> {
               markers: [
                 for (final cluster in clusters)
                   if (cluster.isSingle)
-                    Marker(
-                      point: cluster.center,
-                      width: 40,
-                      height: 40,
-                      child: _Tappable(
-                        onTap: widget.onMarkerTap == null
-                            ? null
-                            : () => widget.onMarkerTap!(cluster.memberIndices.single),
-                        child: Tooltip(
-                          message: widget.markers[cluster.memberIndices.single].label ??
-                              widget.markers[cluster.memberIndices.single].point.short,
-                          child: MapPin(
-                            icon: widget.markers[cluster.memberIndices.single].icon,
-                            color: widget.markers[cluster.memberIndices.single].color ??
-                                scheme.primary,
-                          ),
-                        ),
-                      ),
+                    _singleMarker(
+                      scheme,
+                      cluster,
+                      widget.markers[cluster.memberIndices.single],
                     )
                   else
                     Marker(
@@ -479,6 +505,40 @@ class MapPin extends StatelessWidget {
         ],
       ),
       child: Icon(icon, color: Colors.white, size: 20),
+    );
+  }
+}
+
+/// Circular numbered badge for one ordered pin (e.g. stop 3 of a run),
+/// styled like [MapPin] so it reads as a pin, not a cluster.
+class NumberedMapPin extends StatelessWidget {
+  const NumberedMapPin({super.key, required this.number, required this.color});
+
+  final int number;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white, width: 2.5),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
+        ],
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        '$number',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 16,
+        ),
+      ),
     );
   }
 }

@@ -400,6 +400,7 @@ async def get_truck_planned_route(db: AsyncDatabase, truck_id: str) -> TruckPlan
         name=doc.get("name"),
         origin=doc["origin"],
         stops=stops,
+        total_stops=len(doc.get("stops", [])),
         status=doc["status"],
         scheduled_for=route_model.scheduled_day(doc),
         created_at=doc["created_at"],

@@ -67,10 +67,12 @@ class TruckPlannedRouteResponse(PlannedRouteResponse):
 
     Embeds the depot facilities so collectors — who cannot list facilities —
     still see where the route ends. Stops whose posts were collected since
-    planning are already filtered out.
+    planning are already filtered out; [total_stops] is the pre-filter
+    count so collectors see run progress (collected = total - remaining).
     """
 
     depots: list[FacilityResponse] = Field(default_factory=list)
+    total_stops: int = 0
 
 
 class CollectVicinityRequest(BaseModel):
