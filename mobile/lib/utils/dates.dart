@@ -72,3 +72,17 @@ DateTime todayDay() {
   final now = DateTime.now();
   return DateTime(now.year, now.month, now.day);
 }
+
+/// 'Today', 'Tomorrow', 'In 5 days', 'Yesterday', '3 days ago'.
+/// [today] is injectable so tests don't depend on the wall clock.
+String relativeDay(DateTime day, {DateTime? today}) {
+  final base = today ?? todayDay();
+  final delta = DateTime(day.year, day.month, day.day)
+      .difference(DateTime(base.year, base.month, base.day))
+      .inDays;
+  if (delta == 0) return 'Today';
+  if (delta == 1) return 'Tomorrow';
+  if (delta == -1) return 'Yesterday';
+  if (delta > 1) return 'In $delta days';
+  return '${-delta} days ago';
+}

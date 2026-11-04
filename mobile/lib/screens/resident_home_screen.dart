@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/dates.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import 'classify_screen.dart';
@@ -177,6 +178,7 @@ class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
+          _NextPickupCard(key: ValueKey(_badgeReload)),
           for (final (icon, title, subtitle, screen) in entries)
             Card(
               child: ListTile(
@@ -205,6 +207,80 @@ class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// The resident's nearest scheduled pickup: day, route, truck, and run
+/// status. Tapping drills into the pickup calendar. Hidden while loading,
+/// on error, or when signed out; an explicit empty card shows when nothing
+/// is scheduled so residents learn where pickups will appear.
+class _NextPickupCard extends StatelessWidget {
+  const _NextPickupCard({super.key});
+
+  void _openCalendar(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const PickupCalendarScreen()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    if (auth.user == null) return const SizedBox.shrink();
+    return FutureBuilder(
+      future: auth.garbage.getMyPickups(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+        final pickups = snapshot.data!;
+        if (pickups.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Card(
+              margin: EdgeInsets.zero,
+              child: ListTile(
+                leading: const CardIcon(icon: Icons.calendar_month_outlined),
+                title: const Text('No upcoming pickups'),
+                subtitle: const Text('Scheduled runs will appear here'),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                onTap: () => _openCalendar(context),
+              ),
+            ),
+          );
+        }
+        // The API sorts by day, but the minimum wins regardless of order.
+        var next = pickups.first;
+        for (final pickup in pickups) {
+          if (pickup.scheduledFor.isBefore(next.scheduledFor)) next = pickup;
+        }
+        final today = todayDay();
+        final overdue = next.scheduledFor.isBefore(today);
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Card(
+            margin: EdgeInsets.zero,
+            child: ListTile(
+              leading: const CardIcon(icon: Icons.local_shipping_outlined),
+              title: Text(
+                '${overdue ? 'Pickup overdue' : 'Next pickup'} · '
+                '${relativeDay(next.scheduledFor, today: today)}',
+              ),
+              subtitle: Text(
+                '${formatDay(next.scheduledFor)} · '
+                '${next.routeName ?? next.routeId} · ${next.plateNumber}',
+              ),
+              trailing: StatusPill(
+                label: pretty(next.routeStatus),
+                status: next.routeStatus,
+              ),
+              onTap: () => _openCalendar(context),
+            ),
+          ),
+        );
+      },
     );
   }
 }

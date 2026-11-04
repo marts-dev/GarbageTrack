@@ -65,6 +65,48 @@ AuthProvider _pickupsAuth(List<Map<String, dynamic>> pickups) =>
       ),
     );
 
+/// Home-screen backend: saved collection point (past the setup gate),
+/// configurable pickups, and an empty pending badge.
+AuthProvider _homeAuth({
+  List<Map<String, dynamic>> pickups = const [],
+  int pickupsStatus = 200,
+}) =>
+    AuthProvider.withUser(
+      _user(),
+      client: ApiClient(
+        baseUrl: 'http://x',
+        httpClient: MockClient((request) async {
+          final path = request.url.path;
+          if (request.method == 'GET' &&
+              path == '/api/v1/users/u1/location') {
+            return http.Response(
+              jsonEncode({
+                'user_id': 'u1',
+                'location': {
+                  'type': 'Point',
+                  'coordinates': [3.37, 6.45]
+                },
+                'updated_at': '2026-11-01T00:00:00Z',
+              }),
+              200,
+            );
+          }
+          if (request.method == 'GET' &&
+              path == '/api/v1/garbage/mine/pickups') {
+            if (pickupsStatus != 200) {
+              return http.Response(
+                  jsonEncode({'detail': 'boom'}), pickupsStatus);
+            }
+            return http.Response(jsonEncode(pickups), 200);
+          }
+          if (request.method == 'GET' && path == '/api/v1/garbage') {
+            return http.Response('[]', 200);
+          }
+          return http.Response('not found', 404);
+        }),
+      ),
+    );
+
 /// Tall surface so the month grid and the day list fit without scrolling.
 void _useTallSurface(WidgetTester tester) {
   tester.view.devicePixelRatio = 1.0;
@@ -107,6 +149,27 @@ void main() {
       expect(formatMonthYear(day), 'December 2026');
       expect(sameDay(day, DateTime(2026, 12, 25, 23, 59)), isTrue);
       expect(sameDay(day, DateTime(2026, 12, 26)), isFalse);
+    });
+
+    test('relativeDay names nearby days and counts the rest', () {
+      final today = DateTime(2026, 11, 4);
+      expect(relativeDay(today, today: today), 'Today');
+      expect(
+        relativeDay(DateTime(2026, 11, 5), today: today),
+        'Tomorrow',
+      );
+      expect(
+        relativeDay(DateTime(2026, 11, 9), today: today),
+        'In 5 days',
+      );
+      expect(
+        relativeDay(DateTime(2026, 11, 3), today: today),
+        'Yesterday',
+      );
+      expect(
+        relativeDay(DateTime(2026, 11, 1), today: today),
+        '3 days ago',
+      );
     });
   });
 
@@ -284,6 +347,77 @@ void main() {
       await tester.tap(find.text('Pickup calendar'));
       await tester.pumpAndSettle();
       expect(find.text(formatMonthYear(todayDay())), findsOneWidget);
+    });
+  });
+
+  group('next pickup card', () {
+    testWidgets('shows the earliest run and drills into the calendar',
+        (tester) async {
+      final today = todayDay();
+      final soon = DateTime(today.year, today.month, today.day + 1);
+      final later = DateTime(today.year, today.month, today.day + 3);
+      await tester.pumpWidget(_withAuth(
+        _homeAuth(pickups: [
+          _pickupJson(postId: 'p2', day: later, plate: 'BBB-2'),
+          _pickupJson(postId: 'p1', day: soon),
+        ]),
+        const ResidentHomeScreen(),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Next pickup · Tomorrow'), findsOneWidget);
+      expect(
+        find.text('${formatDay(soon)} · Morning run · AAA-1'),
+        findsOneWidget,
+      );
+      expect(find.widgetWithText(StatusPill, 'Assigned'), findsOneWidget);
+
+      await tester.tap(find.text('Next pickup · Tomorrow'));
+      await tester.pumpAndSettle();
+      expect(find.text(formatMonthYear(today)), findsOneWidget);
+    });
+
+    testWidgets('overdue pickups call out the delay', (tester) async {
+      final today = todayDay();
+      final late = DateTime(today.year, today.month, today.day - 1);
+      await tester.pumpWidget(_withAuth(
+        _homeAuth(pickups: [
+          _pickupJson(postId: 'p1', day: late, routeStatus: 'in_progress'),
+        ]),
+        const ResidentHomeScreen(),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pickup overdue · Yesterday'), findsOneWidget);
+      expect(find.widgetWithText(StatusPill, 'In Progress'), findsOneWidget);
+    });
+
+    testWidgets('empty pickups show the no-upcoming card', (tester) async {
+      await tester.pumpWidget(_withAuth(
+        _homeAuth(pickups: []),
+        const ResidentHomeScreen(),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('No upcoming pickups'), findsOneWidget);
+      await tester.tap(find.text('No upcoming pickups'));
+      await tester.pumpAndSettle();
+      expect(find.text(formatMonthYear(todayDay())), findsOneWidget);
+    });
+
+    testWidgets('card hides when the pickups call fails', (tester) async {
+      await tester.pumpWidget(_withAuth(
+        _homeAuth(pickupsStatus: 500),
+        const ResidentHomeScreen(),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Next pickup'), findsNothing);
+      expect(find.textContaining('Pickup overdue'), findsNothing);
+      expect(find.text('No upcoming pickups'), findsNothing);
+      // The rest of home is unaffected.
+      expect(find.text('My reports'), findsOneWidget);
+      expect(find.text('Pickup calendar'), findsOneWidget);
     });
   });
 }
