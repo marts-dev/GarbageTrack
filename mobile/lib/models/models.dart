@@ -8,6 +8,7 @@ const garbageTypes = [
   'glass',
   'metal',
   'electronic',
+  'battery',
   'hazardous',
   'textile',
   'general',

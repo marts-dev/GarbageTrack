@@ -153,8 +153,8 @@ async def seed() -> dict:
              GarbageStatus.SCHEDULED, 2, False, "Commonwealth"),
             (121.0340, 14.6540, [GarbageType.TEXTILE], "Clothing pile",
              GarbageStatus.COLLECTED, 4, False, "Batasan Hills"),
-            (121.0270, 14.6470, [GarbageType.HAZARDOUS], "Used batteries",
-             GarbageStatus.COLLECTED, 5, False, "Commonwealth"),
+            (121.0270, 14.6470, [GarbageType.BATTERY], "Used batteries",
+             GarbageStatus.POSTED, 0, False, "Commonwealth"),
             (121.0360, 14.6560, [GarbageType.PLASTIC, GarbageType.PAPER], "Mixed dump behind plaza",
              GarbageStatus.SCHEDULED, 1, False, "Batasan Hills"),
         ]
@@ -209,7 +209,7 @@ async def seed() -> dict:
                 id=truck_ids[2],
                 plate_number="NCC 9012",
                 availability=TruckAvailability.AVAILABLE,
-                garbage_types=[GarbageType.GLASS, GarbageType.METAL],
+                garbage_types=[GarbageType.GLASS, GarbageType.METAL, GarbageType.BATTERY],
                 capacity=6,
             ),
         ]
@@ -238,7 +238,7 @@ async def seed() -> dict:
                 name="Marikina Waste Center",
                 kind=FacilityKind.WASTE_CENTER,
                 location=pt(121.0400, 14.6400),
-                accepted_types=[GarbageType.GENERAL, GarbageType.TEXTILE, GarbageType.ELECTRONIC],
+                accepted_types=[GarbageType.GENERAL, GarbageType.TEXTILE, GarbageType.ELECTRONIC, GarbageType.BATTERY],
                 address="10 Central Rd, Marikina",
             ),
         ]

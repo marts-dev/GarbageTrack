@@ -18,6 +18,7 @@ class GarbageType(StrEnum):
     GLASS = "glass"
     METAL = "metal"
     ELECTRONIC = "electronic"
+    BATTERY = "battery"
     HAZARDOUS = "hazardous"
     TEXTILE = "textile"
     GENERAL = "general"

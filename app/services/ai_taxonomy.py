@@ -16,7 +16,7 @@ from app.models.garbage import GarbageType
 # Supercategories whose every category shares one material.
 _SUPER_TO_APP: dict[str, GarbageType] = {
     "Aluminium foil": GarbageType.METAL,
-    "Battery": GarbageType.HAZARDOUS,
+    "Battery": GarbageType.BATTERY,
     "Broken glass": GarbageType.GLASS,
     "Carton": GarbageType.PAPER,
     "Cigarette": GarbageType.GENERAL,
@@ -104,12 +104,15 @@ def map_taco_category(name: str, supercategory: str) -> GarbageType:
 # earlier type win over later ones (so 'glass bottle' lands on glass, not
 # plastic). GENERAL has no keywords — it is the explicit no-match result.
 DESCRIPTION_KEYWORDS: tuple[tuple[GarbageType, tuple[str, ...]], ...] = (
-    # Hazardous first: danger words are more specific than device words, so
-    # 'phone battery' lands on the battery, not the phone.
+    # Battery first: 'phone battery' lands on the battery, not the phone.
+    (
+        GarbageType.BATTERY,
+        ("battery", "batteries"),
+    ),
     (
         GarbageType.HAZARDOUS,
         (
-            "battery", "batteries", "paint", "chemical", "pesticide",
+            "paint", "chemical", "pesticide",
             "fluorescent", "aerosol", "spray can", "motor oil", "fuel",
             "thinner", "bleach", "acid", "medicine", "syringe", "needle",
             "bulb",

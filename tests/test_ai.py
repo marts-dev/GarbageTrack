@@ -50,7 +50,7 @@ def test_classify_description_matches_keywords(client, make_user):
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["placeholder"] is False
-    assert body["suggested_types"] == ["hazardous"]
+    assert body["suggested_types"] == ["battery"]
     assert body["confidence"] == 0.6
     assert "battery" in body["message"]
 
@@ -138,6 +138,7 @@ def test_taco_merge_covers_known_categories():
     assert ai_taxonomy.map_taco_category("Glass bottle", "Bottle") == GarbageType.GLASS
     assert ai_taxonomy.map_taco_category("Drink can", "Can") == GarbageType.METAL
     assert ai_taxonomy.map_taco_category("Aerosol", "Can") == GarbageType.HAZARDOUS
+    assert ai_taxonomy.map_taco_category("Battery", "Battery") == GarbageType.BATTERY
     assert ai_taxonomy.map_taco_category("Pizza box", "Carton") == GarbageType.PAPER
     assert ai_taxonomy.map_taco_category("Food waste", "Food waste") == GarbageType.ORGANIC
     assert ai_taxonomy.map_taco_category("Shoe", "Shoe") == GarbageType.TEXTILE
@@ -191,7 +192,7 @@ def test_load_samples_merges_labels_and_reports_fallbacks(tmp_path):
     samples, fallbacks, skipped_tiny = train.load_samples(
         _coco_file(tmp_path), tmp_path
     )
-    assert [s["label"] for s in samples] == [3, 4, 8]
+    assert [s["label"] for s in samples] == [3, 4, 9]
     assert samples[0]["box"] == (5.0, 5.0, 55.0, 55.0)
     assert fallbacks == {"Mystery litter": 1}
     assert skipped_tiny == 1

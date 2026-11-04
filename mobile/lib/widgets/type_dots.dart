@@ -11,6 +11,7 @@ const _typeSwatches = <String, MaterialColor>{
   'glass': Colors.cyan,
   'metal': Colors.blueGrey,
   'electronic': Colors.deepOrange,
+  'battery': Colors.lime,
   'hazardous': Colors.red,
   'textile': Colors.pink,
   'general': Colors.brown,
