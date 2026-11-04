@@ -10,6 +10,7 @@ import 'package:garbagetrack/models/models.dart';
 import 'package:garbagetrack/screens/logistics_home_screen.dart';
 import 'package:garbagetrack/screens/truck_form_screen.dart';
 import 'package:garbagetrack/state/auth_provider.dart';
+import 'package:garbagetrack/utils/dates.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:provider/provider.dart';
@@ -55,6 +56,7 @@ Map<String, dynamic> _truckJson(
   String? operatorId,
   List<String> types = const ['plastic'],
   int? capacity = 10,
+  int load = 0,
 }) =>
     {
       'id': id,
@@ -64,7 +66,7 @@ Map<String, dynamic> _truckJson(
       'current_location': null,
       'eta_minutes': null,
       'capacity': capacity,
-      'load': 0,
+      'load': load,
       'operator_id': operatorId,
       'created_at': '2026-10-29T00:00:00Z',
     };
@@ -165,7 +167,8 @@ void main() {
           }
           if (request.method == 'PATCH' &&
               RegExp(r'^/api/v1/trucks/[^/]+$').hasMatch(path)) {
-            patchBodies?.addAll(jsonDecode(request.body) as Map<String, dynamic>);
+            patchBodies
+                ?.addAll(jsonDecode(request.body) as Map<String, dynamic>);
             if (patchStatus != 200) {
               return http.Response(
                 jsonEncode({'detail': patchDetail}),
@@ -203,8 +206,7 @@ void main() {
     Future<void> scrollTap(WidgetTester tester, Finder finder) async {
       Future<void> sweep(Offset delta) async {
         final rect = tester.getRect(find.byType(ListView).first);
-        await tester.dragFrom(
-            Offset(rect.right - 4, rect.center.dy), delta);
+        await tester.dragFrom(Offset(rect.right - 4, rect.center.dy), delta);
         await tester.pumpAndSettle();
       }
 
@@ -224,7 +226,8 @@ void main() {
       _useTallSurface(tester);
       final calls = <String>[];
       await tester.pumpWidget(
-        _withAuth(formAuth(calls), TruckFormScreen(tileProvider: _StubTileProvider())),
+        _withAuth(formAuth(calls),
+            TruckFormScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await scrollTap(tester, find.text('Register truck'));
@@ -235,7 +238,8 @@ void main() {
     testWidgets('at least one garbage type is required', (tester) async {
       final calls = <String>[];
       await tester.pumpWidget(
-        _withAuth(formAuth(calls), TruckFormScreen(tileProvider: _StubTileProvider())),
+        _withAuth(formAuth(calls),
+            TruckFormScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).first, 'NEW-1');
@@ -248,7 +252,8 @@ void main() {
         (tester) async {
       final calls = <String>[];
       await tester.pumpWidget(
-        _withAuth(formAuth(calls), TruckFormScreen(tileProvider: _StubTileProvider())),
+        _withAuth(formAuth(calls),
+            TruckFormScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).first, 'NEW-1');
@@ -294,8 +299,10 @@ void main() {
       final existing =
           Truck.fromJson(_truckJson('t1', 'AAA-1', operatorId: 'c2'));
       await tester.pumpWidget(
-        _withAuth(formAuth(calls, patchBodies: patchBodies),
-            TruckFormScreen(existing: existing, tileProvider: _StubTileProvider())),
+        _withAuth(
+            formAuth(calls, patchBodies: patchBodies),
+            TruckFormScreen(
+                existing: existing, tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       expect(find.text('Edit truck'), findsOneWidget);
@@ -317,8 +324,10 @@ void main() {
       final existing =
           Truck.fromJson(_truckJson('t1', 'AAA-1', operatorId: 'c2'));
       await tester.pumpWidget(
-        _withAuth(formAuth(calls, patchBodies: patchBodies),
-            TruckFormScreen(existing: existing, tileProvider: _StubTileProvider())),
+        _withAuth(
+            formAuth(calls, patchBodies: patchBodies),
+            TruckFormScreen(
+                existing: existing, tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await scrollTap(tester, find.text('Collector c2 · c2@x.com'));
@@ -345,8 +354,7 @@ void main() {
       expect(calls, contains('POST /api/v1/trucks/schedules'));
       // Creation pins availability server-side; the form sends no status.
       expect(postBodies.containsKey('status'), isFalse);
-      final location =
-          postBodies['current_location'] as Map<String, dynamic>;
+      final location = postBodies['current_location'] as Map<String, dynamic>;
       expect(location['longitude'], isA<double>());
       expect(location['latitude'], isA<double>());
     });
@@ -356,10 +364,10 @@ void main() {
       final patchBodies = <String, dynamic>{};
       final existing = Truck.fromJson(_truckJson('t1', 'AAA-1'));
       await tester.pumpWidget(
-        _withAuth(formAuth(calls, patchBodies: patchBodies),
+        _withAuth(
+            formAuth(calls, patchBodies: patchBodies),
             TruckFormScreen(
-                existing: existing,
-                tileProvider: _StubTileProvider())),
+                existing: existing, tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
       await scrollTap(tester, find.byType(FlutterMap));
@@ -382,7 +390,8 @@ void main() {
             patchStatus: 409,
             patchDetail: 'collector already assigned to another truck',
           ),
-          TruckFormScreen(existing: existing, tileProvider: _StubTileProvider()),
+          TruckFormScreen(
+              existing: existing, tileProvider: _StubTileProvider()),
         ),
       );
       await tester.pumpAndSettle();
@@ -489,7 +498,8 @@ void main() {
       expect(find.text('BBB-2'), findsOneWidget);
       expect(find.text('Assigned'), findsOneWidget);
       expect(find.text('Unassigned'), findsOneWidget);
-      expect(find.widgetWithText(FloatingActionButton, 'Truck'), findsOneWidget);
+      expect(
+          find.widgetWithText(FloatingActionButton, 'Truck'), findsOneWidget);
     });
 
     testWidgets('empty list prompts the Truck button', (tester) async {
@@ -561,7 +571,8 @@ void main() {
       expect(find.text('No trucks yet.'), findsOneWidget);
     });
 
-    testWidgets('delete 409 surfaces the route-assigned detail', (tester) async {
+    testWidgets('delete 409 surfaces the route-assigned detail',
+        (tester) async {
       final calls = <String>[];
       final trucks = [_truckJson('t1', 'AAA-1')];
       await openTrucksTab(
@@ -594,6 +605,257 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
       await tester.pumpAndSettle();
       expect(find.text('Truck not found'), findsOneWidget);
+    });
+  });
+
+  group('overview needs attention', () {
+    Map<String, dynamic> routeJson(
+      String id,
+      String name,
+      String status,
+      String scheduledFor, {
+      int stops = 1,
+    }) =>
+        {
+          'id': id,
+          'truck_id': 't1',
+          'name': name,
+          'origin': {
+            'type': 'Point',
+            'coordinates': [3.37, 6.45]
+          },
+          'stops': [
+            for (var i = 0; i < stops; i++)
+              {
+                'post_id': 'p$i',
+                'location': {
+                  'type': 'Point',
+                  'coordinates': [3.38, 6.46]
+                },
+                'types': ['plastic'],
+              },
+          ],
+          'status': status,
+          'scheduled_for': scheduledFor,
+          'depot_ids': [],
+        };
+
+    MockClient attentionBackend({
+      required Map<String, dynamic> summary,
+      required List<Map<String, dynamic>> routes,
+      required List<Map<String, dynamic>> trucks,
+      bool failExtras = false,
+    }) =>
+        MockClient((request) async {
+          final path = request.url.path;
+          if (request.method == 'GET' &&
+              path == '/api/v1/logistics/garbage/summary') {
+            return http.Response(jsonEncode(summary), 200);
+          }
+          if (failExtras) {
+            return http.Response(jsonEncode({'detail': 'nope'}), 404);
+          }
+          if (request.method == 'GET' && path == '/api/v1/logistics/routes') {
+            return http.Response(jsonEncode(routes), 200);
+          }
+          if (request.method == 'GET' && path == '/api/v1/trucks') {
+            return http.Response(jsonEncode(trucks), 200);
+          }
+          final truckMatch =
+              RegExp(r'^/api/v1/trucks/([^/]+)$').firstMatch(path);
+          if (request.method == 'GET' && truckMatch != null) {
+            final found =
+                trucks.where((t) => t['id'] == truckMatch.group(1)).toList();
+            if (found.isEmpty) {
+              return http.Response(jsonEncode({'detail': 'nope'}), 404);
+            }
+            return http.Response(jsonEncode(found.single), 200);
+          }
+          if (request.method == 'GET' &&
+              path == '/api/v1/logistics/facilities') {
+            return http.Response('[]', 200);
+          }
+          return http.Response(jsonEncode({'detail': 'nope'}), 404);
+        });
+
+    AuthProvider attentionAuth({
+      required Map<String, dynamic> summary,
+      required List<Map<String, dynamic>> routes,
+      required List<Map<String, dynamic>> trucks,
+      bool failExtras = false,
+    }) =>
+        AuthProvider.withUser(
+          _user('logistics'),
+          client: ApiClient(
+            baseUrl: 'http://x',
+            httpClient: attentionBackend(
+              summary: summary,
+              routes: routes,
+              trucks: trucks,
+              failExtras: failExtras,
+            ),
+          ),
+        );
+
+    Future<void> pumpOverview(
+      WidgetTester tester,
+      AuthProvider auth,
+    ) async {
+      await tester.pumpWidget(_withAuth(
+        auth,
+        LogisticsHomeScreen(tileProvider: _StubTileProvider()),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    Map<String, dynamic> summaryWith({required int posted}) => {
+          'total': posted,
+          'by_status': {'posted': posted},
+          'by_type': {'plastic': posted},
+        };
+
+    testWidgets('shows every signal kind with deep links', (tester) async {
+      final today = todayDay();
+      final late = toIsoDay(DateTime(today.year, today.month, today.day - 2));
+      final upcoming =
+          toIsoDay(DateTime(today.year, today.month, today.day + 1));
+      await pumpOverview(
+        tester,
+        attentionAuth(
+          summary: summaryWith(posted: 5),
+          routes: [
+            routeJson('r1', 'Late run', 'assigned', late),
+            // Not overdue: future day.
+            routeJson('r2', 'Current run', 'assigned', upcoming),
+            // Not overdue: finished despite the old day.
+            routeJson('r3', 'Old done run', 'done', late),
+          ],
+          trucks: [
+            _truckJson('t1', 'AAA-1'),
+            _truckJson('t2', 'BBB-2', operatorId: 'c1', load: 10),
+            _truckJson('t3', 'CCC-3', operatorId: 'c1', load: 2),
+          ],
+        ),
+      );
+
+      expect(find.text('Needs attention'), findsOneWidget);
+      expect(find.text('5 reports awaiting routes'), findsOneWidget);
+      expect(find.text('Late run'), findsOneWidget);
+      expect(find.text('2 days overdue · 1 stop'), findsOneWidget);
+      expect(find.text('AAA-1'), findsOneWidget);
+      expect(find.text('No operator assigned'), findsOneWidget);
+      expect(find.text('BBB-2'), findsOneWidget);
+      expect(find.text('Full · Load 10/10'), findsOneWidget);
+      // Healthy items stay out of the section.
+      expect(find.text('Current run'), findsNothing);
+      expect(find.text('Old done run'), findsNothing);
+      expect(find.text('CCC-3'), findsNothing);
+      expect(find.text('All clear'), findsNothing);
+    });
+
+    testWidgets('shows all clear when nothing needs attention', (tester) async {
+      await pumpOverview(
+        tester,
+        attentionAuth(
+          summary: summaryWith(posted: 0),
+          routes: [],
+          trucks: [_truckJson('t3', 'CCC-3', operatorId: 'c1', load: 2)],
+        ),
+      );
+      expect(find.text('Needs attention'), findsOneWidget);
+      expect(find.text('All clear'), findsOneWidget);
+      expect(
+        find.text('Nothing needs attention right now.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('extras fail open, the dashboard still renders',
+        (tester) async {
+      await pumpOverview(
+        tester,
+        attentionAuth(
+          summary: summaryWith(posted: 3),
+          routes: [],
+          trucks: [],
+          failExtras: true,
+        ),
+      );
+      // Summary-driven rows survive; truck/route rows drop out quietly.
+      expect(find.text('3 reports awaiting routes'), findsOneWidget);
+      expect(find.text('Total reports'), findsOneWidget);
+      expect(find.text('All clear'), findsNothing);
+    });
+
+    testWidgets('awaiting row opens route creation', (tester) async {
+      await pumpOverview(
+        tester,
+        attentionAuth(
+          summary: summaryWith(posted: 5),
+          routes: [],
+          trucks: [],
+        ),
+      );
+      await tester.tap(find.text('5 reports awaiting routes'));
+      await tester.pumpAndSettle();
+      expect(find.text('New route'), findsOneWidget);
+    });
+
+    testWidgets('overdue row opens the route detail', (tester) async {
+      final today = todayDay();
+      await pumpOverview(
+        tester,
+        attentionAuth(
+          summary: summaryWith(posted: 0),
+          routes: [
+            routeJson(
+              'r1',
+              'Late run',
+              'in_progress',
+              toIsoDay(DateTime(today.year, today.month, today.day - 1)),
+            ),
+          ],
+          trucks: [_truckJson('t1', 'AAA-1', operatorId: 'c1')],
+        ),
+      );
+      await tester.tap(find.text('Late run'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('Late run'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('truck rows open the truck detail', (tester) async {
+      Future<void> pump() => pumpOverview(
+            tester,
+            attentionAuth(
+              summary: summaryWith(posted: 0),
+              routes: [],
+              trucks: [
+                _truckJson('t1', 'AAA-1'),
+                _truckJson('t2', 'BBB-2', operatorId: 'c1', load: 10),
+              ],
+            ),
+          );
+
+      await pump();
+      await tester.tap(find.text('AAA-1'));
+      await tester.pumpAndSettle();
+      // The attention row is offstage under the push; only the detail
+      // header matches.
+      expect(find.text('AAA-1'), findsOneWidget);
+
+      // Back to the overview for the second row (pumpWidget would keep
+      // the pushed route: the element tree updates in place).
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('BBB-2'));
+      await tester.pumpAndSettle();
+      expect(find.text('BBB-2'), findsOneWidget);
     });
   });
 }

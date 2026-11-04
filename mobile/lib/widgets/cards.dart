@@ -7,9 +7,12 @@ Color _statusColor(BuildContext context, String status) {
   final scheme = Theme.of(context).colorScheme;
   return switch (status) {
     'collected' || 'done' => scheme.primary,
-    'scheduled' || 'pending_confirmation' || 'enroute' || 'working' =>
+    'scheduled' ||
+    'pending_confirmation' ||
+    'enroute' ||
+    'working' =>
       scheme.tertiary,
-    'full' => scheme.error,
+    'full' || 'overdue' => scheme.error,
     _ => scheme.secondary,
   };
 }
@@ -103,7 +106,8 @@ class PostCard extends StatelessWidget {
 }
 
 class TruckCard extends StatelessWidget {
-  const TruckCard({super.key, required this.truck, this.onTap, this.badge, this.action});
+  const TruckCard(
+      {super.key, required this.truck, this.onTap, this.badge, this.action});
 
   final Truck truck;
   final VoidCallback? onTap;

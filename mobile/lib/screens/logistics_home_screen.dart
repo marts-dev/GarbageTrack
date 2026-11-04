@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../api/api_client.dart';
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/dates.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import '../widgets/type_dots.dart';
@@ -15,6 +16,7 @@ import '../widgets/route_preview.dart';
 import 'facility_form_screen.dart';
 import 'route_create_screen.dart';
 import 'route_detail_screen.dart';
+import 'truck_detail_screen.dart';
 import 'truck_form_screen.dart';
 
 class LogisticsHomeScreen extends StatelessWidget {
@@ -81,20 +83,53 @@ class _OverviewTab extends StatefulWidget {
 class _OverviewTabState extends State<_OverviewTab> {
   int _reload = 0;
 
+  /// Dashboard data: the summary plus best-effort extras for the
+  /// needs-attention section. The extras fail open to empty, so a broken
+  /// routes/trucks call hides those rows instead of the dashboard.
+  Future<
+      ({
+        GarbageSummary summary,
+        List<PlannedRoute> routes,
+        List<Truck> trucks
+      })> _load(AuthProvider auth) {
+    final summary = auth.logistics.garbageSummary(country: auth.country);
+    final routes = auth.logistics
+        .listRoutes()
+        .then((r) => r, onError: (_) => <PlannedRoute>[]);
+    final trucks =
+        auth.trucks.listTrucks().then((t) => t, onError: (_) => <Truck>[]);
+    return Future.wait([summary, routes, trucks]).then((all) => (
+          summary: all[0] as GarbageSummary,
+          routes: all[1] as List<PlannedRoute>,
+          trucks: all[2] as List<Truck>,
+        ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     return FutureBuilder(
       key: ValueKey(_reload),
-      future: auth.logistics.garbageSummary(country: auth.country),
-      builder: (context, snapshot) => AsyncView<GarbageSummary>(
+      future: _load(auth),
+      builder: (context, snapshot) => AsyncView<
+          ({
+            GarbageSummary summary,
+            List<PlannedRoute> routes,
+            List<Truck> trucks
+          })>(
         snapshot: snapshot,
         onRetry: () => setState(() => _reload++),
-        builder: (context, summary) => RefreshIndicator(
+        builder: (context, data) => RefreshIndicator(
           onRefresh: () async => setState(() => _reload++),
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _NeedsAttentionSection(
+                summary: data.summary,
+                routes: data.routes,
+                trucks: data.trucks,
+                tileProvider: widget.tileProvider,
+              ),
               Card(
                 margin: EdgeInsets.zero,
                 child: Padding(
@@ -108,7 +143,7 @@ class _OverviewTabState extends State<_OverviewTab> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '${summary.total}',
+                              '${data.summary.total}',
                               style: Theme.of(context).textTheme.headlineMedium,
                             ),
                             Text(
@@ -132,13 +167,13 @@ class _OverviewTabState extends State<_OverviewTab> {
               const SizedBox(height: 16),
               _RegionSection(
                 country: auth.country,
-                summary: summary,
+                summary: data.summary,
                 tileProvider: widget.tileProvider,
                 regionBoundariesLoader: widget.regionBoundariesLoader,
               ),
               Text('By status', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              for (final entry in summary.byStatus.entries)
+              for (final entry in data.summary.byStatus.entries)
                 Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
@@ -155,12 +190,172 @@ class _OverviewTabState extends State<_OverviewTab> {
               const SizedBox(height: 8),
               Text('By type', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              TypeCountRows(summary.byType),
+              TypeCountRows(data.summary.byType),
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+/// Actionable items for the logistics user: unscheduled reports, overdue
+/// routes, trucks without operators, and full trucks. Each row deep-links
+/// to the screen that resolves it. Empty sources (or failed extra
+/// fetches) simply contribute no rows; with nothing to show, an all-clear
+/// card confirms the dashboard was checked.
+class _NeedsAttentionSection extends StatelessWidget {
+  const _NeedsAttentionSection({
+    required this.summary,
+    required this.routes,
+    required this.trucks,
+    this.tileProvider,
+  });
+
+  final GarbageSummary summary;
+  final List<PlannedRoute> routes;
+  final List<Truck> trucks;
+  final TileProvider? tileProvider;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final today = todayDay();
+    final awaiting = summary.byStatus['posted'] ?? 0;
+    final overdue = routes
+        .where((r) =>
+            (r.status == 'assigned' || r.status == 'in_progress') &&
+            r.scheduledFor != null &&
+            r.scheduledFor!.isBefore(today))
+        .toList()
+      ..sort((a, b) => a.scheduledFor!.compareTo(b.scheduledFor!));
+    final unassigned = trucks.where((t) => t.operatorId == null).toList();
+    final full = trucks
+        .where((t) =>
+            t.capacity != null && t.capacity! > 0 && t.load >= t.capacity!)
+        .toList();
+    final clear =
+        awaiting == 0 && overdue.isEmpty && unassigned.isEmpty && full.isEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Needs attention', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        if (clear)
+          Card(
+            margin: const EdgeInsets.only(bottom: 16),
+            child: ListTile(
+              leading: const CardIcon(icon: Icons.check_circle_outline),
+              title: const Text('All clear'),
+              subtitle: const Text('Nothing needs attention right now.'),
+            ),
+          )
+        else ...[
+          if (awaiting > 0)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const CardIcon(
+                  icon: Icons.schedule_outlined,
+                  status: 'scheduled',
+                ),
+                title: Text(
+                  '$awaiting ${awaiting == 1 ? 'report' : 'reports'} awaiting routes',
+                ),
+                subtitle: const Text('Create a route to schedule them'),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  color: scheme.onSurfaceVariant,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RouteCreateScreen()),
+                ),
+              ),
+            ),
+          for (final route in overdue)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const CardIcon(
+                  icon: Icons.warning_amber_outlined,
+                  status: 'overdue',
+                ),
+                title: Text(route.name ?? 'Route ${route.id}'),
+                subtitle: Text(
+                  '${_overdueLabel(today, route.scheduledFor!)} · '
+                  '${route.stops.length} ${route.stops.length == 1 ? 'stop' : 'stops'}',
+                ),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  color: scheme.onSurfaceVariant,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => RouteDetailScreen(
+                      route: route,
+                      tileProvider: tileProvider,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          for (final truck in unassigned)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const CardIcon(
+                  icon: Icons.person_off_outlined,
+                  status: 'available',
+                ),
+                title: Text(truck.plateNumber),
+                subtitle: const Text('No operator assigned'),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  color: scheme.onSurfaceVariant,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => TruckDetailScreen(
+                      truckId: truck.id,
+                      tileProvider: tileProvider,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          for (final truck in full)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const CardIcon(
+                  icon: Icons.inventory_2_outlined,
+                  status: 'full',
+                ),
+                title: Text(truck.plateNumber),
+                subtitle: Text('Full · Load ${truck.load}/${truck.capacity}'),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  color: scheme.onSurfaceVariant,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => TruckDetailScreen(
+                      truckId: truck.id,
+                      tileProvider: tileProvider,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  String _overdueLabel(DateTime today, DateTime scheduled) {
+    final days = today.difference(scheduled).inDays;
+    return '$days ${days == 1 ? 'day' : 'days'} overdue';
   }
 }
 
@@ -181,8 +376,7 @@ class _RegionSection extends StatelessWidget {
   final Future<String> Function(String asset)? regionBoundariesLoader;
 
   void _showRegion(BuildContext context, String name) {
-    final detail = summary.byRegion[name] ??
-        const RegionSummary(total: 0);
+    final detail = summary.byRegion[name] ?? const RegionSummary(total: 0);
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -240,8 +434,7 @@ class _RegionSection extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('By region',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text('By region', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             RegionChoropleth(
               regions: regions,
@@ -277,8 +470,12 @@ class _TrucksTabState extends State<_TrucksTab> {
         title: const Text('Delete truck?'),
         content: Text('${truck.plateNumber} will be removed.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete')),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete')),
         ],
       ),
     );
@@ -333,7 +530,8 @@ class _TrucksTabState extends State<_TrucksTab> {
                 ),
               );
             }
-            final located = trucks.where((t) => t.currentLocation != null).toList();
+            final located =
+                trucks.where((t) => t.currentLocation != null).toList();
             return RefreshIndicator(
               onRefresh: () async => setState(() => _reload++),
               child: ListView(
@@ -356,7 +554,8 @@ class _TrucksTabState extends State<_TrucksTab> {
                   for (final truck in trucks)
                     Card(
                       child: ListTile(
-                        leading: const CardIcon(icon: Icons.local_shipping_outlined),
+                        leading:
+                            const CardIcon(icon: Icons.local_shipping_outlined),
                         title: Text(truck.plateNumber),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -376,13 +575,15 @@ class _TrucksTabState extends State<_TrucksTab> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             StatusPill(
-                              label: truck.isAssigned ? 'Assigned' : 'Unassigned',
+                              label:
+                                  truck.isAssigned ? 'Assigned' : 'Unassigned',
                               status: truck.isAssigned ? 'done' : 'available',
                             ),
                             PopupMenuButton<String>(
                               onSelected: (action) async {
                                 if (action == 'edit') {
-                                  final saved = await Navigator.of(context).push(
+                                  final saved =
+                                      await Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (_) =>
                                           TruckFormScreen(existing: truck),
@@ -396,8 +597,10 @@ class _TrucksTabState extends State<_TrucksTab> {
                                 }
                               },
                               itemBuilder: (context) => const [
-                                PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                PopupMenuItem(value: 'delete', child: Text('Delete')),
+                                PopupMenuItem(
+                                    value: 'edit', child: Text('Edit')),
+                                PopupMenuItem(
+                                    value: 'delete', child: Text('Delete')),
                               ],
                             ),
                           ],
@@ -437,8 +640,12 @@ class _FacilitiesTabState extends State<_FacilitiesTab> {
         title: const Text('Delete facility?'),
         content: Text('${facility.name} will be removed.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete')),
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete')),
         ],
       ),
     );
@@ -529,7 +736,8 @@ class _FacilitiesTabState extends State<_FacilitiesTab> {
                           },
                           itemBuilder: (context) => const [
                             PopupMenuItem(value: 'edit', child: Text('Edit')),
-                            PopupMenuItem(value: 'delete', child: Text('Delete')),
+                            PopupMenuItem(
+                                value: 'delete', child: Text('Delete')),
                           ],
                         ),
                       ),
@@ -632,8 +840,8 @@ class _RoutesTabState extends State<_RoutesTab> {
                     Card(
                       child: ListTile(
                         leading: RouteGraphPreview(route, size: 56),
-                        title:
-                            Text(route.name ?? 'Route ${route.id.substring(0, 6)}'),
+                        title: Text(
+                            route.name ?? 'Route ${route.id.substring(0, 6)}'),
                         subtitle: Text(
                           '${pretty(route.status)} · ${route.stops.length} stops · from ${route.origin.short}',
                         ),
