@@ -264,18 +264,26 @@ class _NextPickupCard extends StatelessWidget {
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const SizedBox.shrink();
         final pickups = snapshot.data!;
+        final scheme = Theme.of(context).colorScheme;
         if (pickups.isEmpty) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: Card(
               margin: EdgeInsets.zero,
+              color: scheme.primaryContainer,
               child: ListTile(
                 leading: const CardIcon(icon: Icons.calendar_month_outlined),
-                title: const Text('No upcoming pickups'),
-                subtitle: const Text('Scheduled runs will appear here'),
+                title: Text(
+                  'No upcoming pickups',
+                  style: TextStyle(color: scheme.onPrimaryContainer),
+                ),
+                subtitle: Text(
+                  'Scheduled runs will appear here',
+                  style: TextStyle(color: scheme.onPrimaryContainer),
+                ),
                 trailing: Icon(
                   Icons.chevron_right,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  color: scheme.onPrimaryContainer,
                 ),
                 onTap: () => _openCalendar(context),
               ),
@@ -292,6 +300,7 @@ class _NextPickupCard extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 16),
           child: Card(
             margin: EdgeInsets.zero,
+            color: scheme.primaryContainer,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -300,11 +309,15 @@ class _NextPickupCard extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                   child: Text(
                     'Upcoming pickups',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: scheme.onPrimaryContainer,
+                        ),
                   ),
                 ),
                 for (final pickup in rows)
                   ListTile(
+                    textColor: scheme.onPrimaryContainer,
+                    iconColor: scheme.onPrimaryContainer,
                     leading: TypeDots(pickup.types),
                     title: Text(
                       pickup.scheduledFor.isBefore(today)
@@ -327,6 +340,9 @@ class _NextPickupCard extends StatelessWidget {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: scheme.onPrimaryContainer,
+                      ),
                       onPressed: () => _openCalendar(context),
                       child: Text('+ $rest more'),
                     ),

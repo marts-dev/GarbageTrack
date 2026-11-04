@@ -132,6 +132,7 @@ class _OverviewTabState extends State<_OverviewTab> {
               ),
               Card(
                 margin: EdgeInsets.zero,
+                color: Theme.of(context).colorScheme.primaryContainer,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
@@ -144,7 +145,14 @@ class _OverviewTabState extends State<_OverviewTab> {
                           children: [
                             Text(
                               '${data.summary.total}',
-                              style: Theme.of(context).textTheme.headlineMedium,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineMedium
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onPrimaryContainer,
+                                  ),
                             ),
                             Text(
                               'Total reports',
@@ -154,7 +162,7 @@ class _OverviewTabState extends State<_OverviewTab> {
                                   ?.copyWith(
                                     color: Theme.of(context)
                                         .colorScheme
-                                        .onSurfaceVariant,
+                                        .onPrimaryContainer,
                                   ),
                             ),
                           ],

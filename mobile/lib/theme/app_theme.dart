@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
-/// Centralized GarbageTrack theme (Material 3, green seed).
+/// Centralized GarbageTrack theme (Material 3, leaf-green seed with a
+/// warm amber secondary).
 ///
 /// Light + dark variants share the same seed color and shape tokens;
 /// wire both into [MaterialApp] with [themeMode] set to system.
 class AppTheme {
   AppTheme._();
 
-  static const Color seedColor = Color(0xFF2E7D32);
+  static const Color seedColor = Color(0xFF43A047);
+  static const Color secondaryColor = Color(0xFFF9A825);
 
   static ThemeData get light => _build(Brightness.light);
 
@@ -16,6 +18,7 @@ class AppTheme {
   static ThemeData _build(Brightness brightness) {
     final scheme = ColorScheme.fromSeed(
       seedColor: seedColor,
+      secondary: secondaryColor,
       brightness: brightness,
     );
     return ThemeData(
@@ -24,7 +27,7 @@ class AppTheme {
       scaffoldBackgroundColor: scheme.surface,
       appBarTheme: AppBarTheme(
         centerTitle: true,
-        backgroundColor: scheme.surface,
+        backgroundColor: scheme.surfaceContainer,
         foregroundColor: scheme.onSurface,
         elevation: 0,
       ),

@@ -7,7 +7,8 @@ import 'package:garbagetrack/widgets/cards.dart';
 void main() {
   group('AppTheme', () {
     test('uses green seed with Material 3', () {
-      expect(AppTheme.seedColor, const Color(0xFF2E7D32));
+      expect(AppTheme.seedColor, const Color(0xFF43A047));
+      expect(AppTheme.secondaryColor, const Color(0xFFF9A825));
       expect(AppTheme.light.useMaterial3, isTrue);
       expect(AppTheme.dark.useMaterial3, isTrue);
     });
