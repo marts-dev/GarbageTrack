@@ -1289,6 +1289,15 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    /// Jumps to a step by tapping its header. `.first` disambiguates the
+    /// header (headers precede contents in tree order) from same-named
+    /// review rows (InfoRow labels 'Depots'/'Stops') when review is open.
+    Future<void> goToStep(WidgetTester tester, String title) async {
+      await _scrollTo(tester, find.text(title));
+      await tester.tap(find.text(title).first);
+      await tester.pumpAndSettle();
+    }
+
     Future<void> tapMap(WidgetTester tester, Offset at) async {
       await tester.tapAt(at);
       // Single taps wait out the double-tap timeout.
@@ -1314,10 +1323,12 @@ void main() {
       );
       await tester.pumpAndSettle();
       await selectTruck(tester);
+      await goToStep(tester, 'Depots');
       await _scrollTo(tester, find.text('North Depot (Dump Site)'));
       await tester.tap(find.text('North Depot (Dump Site)'));
       await tester.pumpAndSettle();
 
+      await goToStep(tester, 'Stops');
       await _scrollTo(tester, find.text('Draw area'));
       await tester.tap(find.text('Draw area'));
       await tester.pumpAndSettle();
@@ -1339,6 +1350,10 @@ void main() {
       await tester.tap(find.text('Close shape'));
       await tester.pumpAndSettle();
 
+      await goToStep(tester, 'Review');
+      // The stops subtitle and the review row agree on the manual set.
+      expect(find.text('Manual · 1 posts'), findsNWidgets(2));
+      expect(find.text('North Depot · End'), findsOneWidget);
       await _scrollTo(tester, find.text('Assign route'));
       await tester.tap(find.text('Assign route'));
       await tester.pumpAndSettle();
@@ -1346,6 +1361,69 @@ void main() {
       expect(submitted['truck_id'], 't1');
       expect(submitted['depot_ids'], ['f1']);
       expect(submitted['post_ids'], ['p1']);
+      // Placed pins are gone from creation; the body carries stops only.
+      expect(submitted.containsKey('collection_points'), isFalse);
+    });
+
+    testWidgets('continue validates each step in order', (tester) async {
+      final auth = routeAuth(routeBackend(
+        posts: [_postJson('p1', 3.37, 6.45, 'Ojota')],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+
+      // Step 1 needs a truck.
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Pick a truck'), findsOneWidget);
+      expect(find.text('Depots (pick at least one)'), findsNothing);
+      // Expire the snackbar so the next error shows immediately.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      await selectTruck(tester);
+      // The header subtitles the picked plate (scroll it back into view:
+      // the dropdown menu left it outside the lazy viewport).
+      await goToStep(tester, 'Truck & day');
+      expect(find.text('ABC-123'), findsOneWidget);
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Depots (pick at least one)'), findsOneWidget);
+
+      // Step 2 needs a depot.
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Pick at least one depot'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.text('North Depot (Dump Site)'));
+      await tester.tap(find.text('North Depot (Dump Site)'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Posted garbage'), findsOneWidget);
+
+      // Step 3 passes with the default auto selection; review summarizes.
+      await _scrollTo(tester, find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('ABC-123 (Available)'), findsOneWidget);
+      expect(find.text(formatDay(todayDay())), findsOneWidget);
+      expect(find.text('North Depot · End'), findsOneWidget);
+      expect(find.text('Auto · Plastic, Paper'), findsOneWidget);
+
+      // Back returns to the stops step.
+      await _scrollTo(tester, find.text('Back'));
+      await tester.tap(find.text('Back'));
+      await tester.pumpAndSettle();
+      expect(find.text('Posted garbage'), findsOneWidget);
+      expect(find.text('North Depot · End'), findsNothing);
     });
 
     testWidgets('scheduled day picker lands in the submit body',
@@ -1363,13 +1441,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       await selectTruck(tester);
+      await goToStep(tester, 'Depots');
       await _scrollTo(tester, find.text('North Depot (Dump Site)'));
       await tester.tap(find.text('North Depot (Dump Site)'));
       await tester.pumpAndSettle();
 
-      // New routes default to today (scroll back: the depot tap left the
-      // Details card outside the lazily-built viewport).
-      await _scrollTo(tester, find.text('Scheduled day'));
+      // New routes default to today.
+      await goToStep(tester, 'Truck & day');
       expect(find.text('Scheduled day'), findsOneWidget);
       expect(find.text(formatDay(todayDay())), findsOneWidget);
 
@@ -1386,6 +1464,7 @@ void main() {
       final expected = DateTime(today.year, today.month + 1, 15);
       expect(find.text(formatDay(expected)), findsOneWidget);
 
+      await goToStep(tester, 'Review');
       await _scrollTo(tester, find.text('Assign route'));
       await tester.tap(find.text('Assign route'));
       await tester.pumpAndSettle();
@@ -1408,6 +1487,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await selectTruck(tester);
+      await goToStep(tester, 'Depots');
       await _scrollTo(tester, find.text('East Recycler (Recycling)'));
       await tester.tap(find.text('East Recycler (Recycling)'));
       await tester.pumpAndSettle();
@@ -1419,6 +1499,7 @@ void main() {
       expect(find.text('North Depot (Dump Site) · End'), findsOneWidget);
       expect(find.text('East Recycler (Recycling)'), findsOneWidget);
 
+      await goToStep(tester, 'Review');
       await _scrollTo(tester, find.text('Assign route'));
       await tester.tap(find.text('Assign route'));
       await tester.pumpAndSettle();
@@ -1441,13 +1522,91 @@ void main() {
       );
       await tester.pumpAndSettle();
       await selectTruck(tester);
+      await goToStep(tester, 'Depots');
       await _scrollTo(tester, find.text('North Depot (Dump Site)'));
       await tester.tap(find.text('North Depot (Dump Site)'));
       await tester.pumpAndSettle();
 
+      await goToStep(tester, 'Stops');
       await _scrollTo(tester, find.byType(FlutterMap));
       expect(find.byTooltip('Start: truck position'), findsOneWidget);
       expect(find.byTooltip('End: North Depot'), findsOneWidget);
+    });
+
+    testWidgets('pin tap in auto mode flips to manual and selects',
+        (tester) async {
+      final auth = routeAuth(routeBackend(
+        posts: [
+          _postJson('p1', 3.37, 6.45, 'Ojota'),
+          _postJson('p2', 3.60, 6.80, 'Ikeja'),
+        ],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await goToStep(tester, 'Stops');
+      await _scrollTo(tester, find.byType(FlutterMap));
+      // Far-apart posts render as single pins at the fitted zoom.
+      expect(find.byType(MapPin), findsNWidgets(2));
+      expect(
+        find.text('Tip: tap a map pin to hand-pick that stop.'),
+        findsOneWidget,
+      );
+
+      // Auto is on by default; the tap must count, not just highlight.
+      await tester.tap(find.byType(MapPin).first);
+      await tester.pumpAndSettle();
+      final autoSwitch = tester.widget<SwitchListTile>(
+        find.widgetWithText(SwitchListTile, 'Auto-generate stops'),
+      );
+      expect(autoSwitch.value, isFalse);
+      await _scrollTo(tester, find.byType(CheckboxListTile));
+      final tiles = tester
+          .widgetList<CheckboxListTile>(find.byType(CheckboxListTile))
+          .toList();
+      expect(tiles.where((t) => t.value == true), hasLength(1));
+
+      // Review counts the hand-picked stop.
+      await goToStep(tester, 'Review');
+      expect(find.text('Manual · 1 posts'), findsNWidgets(2));
+    });
+
+    testWidgets('auto review discloses ignored hand-picks', (tester) async {
+      final auth = routeAuth(routeBackend(
+        posts: [
+          _postJson('p1', 3.37, 6.45, 'Ojota'),
+          _postJson('p2', 3.60, 6.80, 'Ikeja'),
+        ],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await selectTruck(tester);
+      await goToStep(tester, 'Stops');
+      await _scrollTo(tester, find.byType(FlutterMap));
+      await tester.tap(find.byType(MapPin).first);
+      await tester.pumpAndSettle();
+
+      // Flipping back to auto keeps the pick but auto wins at submit.
+      await _scrollTo(
+          tester,
+          find.widgetWithText(SwitchListTile, 'Auto-generate stops'));
+      await tester
+          .tap(find.widgetWithText(SwitchListTile, 'Auto-generate stops'));
+      await tester.pumpAndSettle();
+      await goToStep(tester, 'Review');
+      expect(
+        find.text('Auto · Plastic, Paper · 1 picked posts ignored'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('undo and clear edit the drawn area', (tester) async {
@@ -1461,6 +1620,7 @@ void main() {
         _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
+      await goToStep(tester, 'Stops');
       await _scrollTo(tester, find.text('Draw area'));
       await tester.tap(find.text('Draw area'));
       await tester.pumpAndSettle();

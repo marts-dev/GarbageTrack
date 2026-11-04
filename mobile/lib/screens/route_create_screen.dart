@@ -9,6 +9,7 @@ import '../utils/country_viewports.dart';
 import '../utils/dates.dart';
 import '../utils/geo.dart';
 import '../widgets/async_view.dart';
+import '../widgets/cards.dart';
 import '../widgets/geo_map.dart';
 import '../widgets/type_dots.dart';
 
@@ -16,8 +17,8 @@ import '../widgets/type_dots.dart';
 /// server auto-generate from the truck's capacity, types, and position.
 ///
 /// Logistics picks one or more depot facilities, optionally narrows posted
-/// garbage by garbage type, taps map pins to select stops, and taps the map
-/// to place collection points.
+/// garbage by garbage type, and taps map pins (or draws an area) to select
+/// stops.
 class RouteCreateScreen extends StatefulWidget {
   const RouteCreateScreen({super.key, this.tileProvider});
 
@@ -45,8 +46,6 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
 
   /// Ordered depot picks in visit order: the last pick is the route end.
   final _depots = <String>[];
-  final _collectionPoints = <GeoPoint>[];
-  bool _addPointsMode = false;
 
   /// Drawn-area selection: map taps append vertices until the shape closes,
   /// then enclosed posted garbage becomes the manual stop set.
@@ -54,6 +53,29 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
   final _polygon = <GeoPoint>[];
   bool _polygonClosed = false;
   bool _busy = false;
+  int _step = 0;
+
+  /// Advances one step when the current step is valid. Step headers stay
+  /// freely tappable; this gate (and [_submit]) is what enforces order.
+  void _continue() {
+    final error = switch (_step) {
+      0 => _truckId == null ? 'Pick a truck' : null,
+      1 => _depots.isEmpty ? 'Pick at least one depot' : null,
+      2 when _auto && _selectedTypes.isEmpty =>
+        'Pick at least one garbage type',
+      2 when !_auto && _picked.isEmpty => 'Pick at least one post',
+      _ => null,
+    };
+    if (error != null) {
+      showError(context, error);
+      return;
+    }
+    if (_step < 3) setState(() => _step++);
+  }
+
+  void _back() {
+    if (_step > 0) setState(() => _step--);
+  }
 
   Future<void> _pickDay(BuildContext context) async {
     final today = todayDay();
@@ -64,7 +86,8 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
       lastDate: today.add(const Duration(days: 365)),
     );
     if (picked != null && mounted) {
-      setState(() => _scheduledFor = DateTime(picked.year, picked.month, picked.day));
+      setState(() =>
+          _scheduledFor = DateTime(picked.year, picked.month, picked.day));
     }
   }
 
@@ -99,8 +122,6 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
         depotIds: _depots.toList(),
         name: _name.text.trim().isEmpty ? null : _name.text.trim(),
         postIds: _auto ? null : _picked.toList(),
-        collectionPoints:
-            _collectionPoints.isEmpty ? null : List.of(_collectionPoints),
         types: _selectedTypes.toList(),
         country: auth.country,
         scheduledFor: _scheduledFor,
@@ -122,353 +143,570 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
     final viewport = viewportFor(auth.country);
     return Scaffold(
       appBar: AppBar(title: const Text('New route')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            margin: EdgeInsets.zero,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Details', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _name,
-                    decoration: const InputDecoration(
-                      labelText: 'Route name (optional)',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.calendar_month_outlined),
-                    title: const Text('Scheduled day'),
-                    subtitle: Text(formatDay(_scheduledFor)),
-                    trailing: const Icon(Icons.edit_outlined),
-                    onTap: () => _pickDay(context),
-                  ),
-                  const SizedBox(height: 12),
-                  FutureBuilder(
-                    future: auth.trucks.listTrucks(),
-                    builder: (context, snapshot) => AsyncView<List<Truck>>(
-                      snapshot: snapshot,
-                      builder: (context, trucks) => DropdownButtonFormField<String>(
-                        initialValue: _truckId,
-                        decoration: const InputDecoration(
-                          labelText: 'Truck',
-                        ),
-                        // Two-line menu rows need a taller item slot.
-                        itemHeight: 68,
-                        items: [
-                          for (final truck in trucks)
-                            DropdownMenuItem(
-                              value: truck.id,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                      '${truck.plateNumber} (${pretty(truck.availability)})'),
-                                  Text(
-                                    truck.loadSummary,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall,
-                                  ),
-                                  if (truck.garbageTypes.isNotEmpty)
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        TypeDots(truck.garbageTypes),
-                                        const SizedBox(width: 6),
-                                        Flexible(
-                                          child: Text(
-                                            truck.garbageTypes
-                                                .map(pretty)
-                                                .join(', '),
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                ],
-                              ),
-                            ),
-                        ],
-                        // Closed field stays a single plate line.
-                        selectedItemBuilder: (context) => [
-                          for (final truck in trucks)
-                            Text(
-                                '${truck.plateNumber} (${pretty(truck.availability)})'),
-                        ],
-                        onChanged: (v) => setState(() {
-                          _truckId = v;
-                          _pickedTruck = null;
-                          for (final truck in trucks) {
-                            if (truck.id == v) _pickedTruck = truck;
-                          }
-                          // A new truck resets the selection to everything
-                          // it can carry.
-                          _selectedTypes = Set.of(
-                              _pickedTruck?.garbageTypes ?? garbageTypes);
-                        }),
+      body: _CreateStepper(
+        step: _step,
+        onStepTapped: (step) => setState(() => _step = step),
+        controls: _StepControls(
+          step: _step,
+          busy: _busy,
+          onBack: _back,
+          onNext: _step == 3 ? _submit : _continue,
+        ),
+        steps: [
+          _CreateStep(
+            title: 'Truck & day',
+            subtitle: _pickedTruck?.plateNumber,
+            content: Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Details',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _name,
+                      decoration: const InputDecoration(
+                        labelText: 'Route name (optional)',
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            margin: EdgeInsets.zero,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Depots (pick at least one)',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Any facility can serve as a depot. Picks run in visit order; the last pick is the route end.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 12),
-                  FutureBuilder(
-                    future: auth.logistics.listFacilities(limit: 100),
-                    builder: (context, snapshot) => AsyncView<List<Facility>>(
-                      snapshot: snapshot,
-                      onRetry: () => setState(() {}),
-                      builder: (context, facilities) {
-                        if (facilities.isEmpty) {
-                          return const Text(
-                              'No facilities yet — register one first.');
-                        }
-                        return Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          children: [
-                            for (final facility in facilities)
-                              FilterChip(
-                                label: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                    const SizedBox(height: 12),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.calendar_month_outlined),
+                      title: const Text('Scheduled day'),
+                      subtitle: Text(formatDay(_scheduledFor)),
+                      trailing: const Icon(Icons.edit_outlined),
+                      onTap: () => _pickDay(context),
+                    ),
+                    const SizedBox(height: 12),
+                    FutureBuilder(
+                      future: auth.trucks.listTrucks(),
+                      builder: (context, snapshot) => AsyncView<List<Truck>>(
+                        snapshot: snapshot,
+                        builder: (context, trucks) =>
+                            DropdownButtonFormField<String>(
+                          initialValue: _truckId,
+                          decoration: const InputDecoration(
+                            labelText: 'Truck',
+                          ),
+                          // Two-line menu rows need a taller item slot.
+                          itemHeight: 68,
+                          items: [
+                            for (final truck in trucks)
+                              DropdownMenuItem(
+                                value: truck.id,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
-                                      '${facility.name} (${pretty(facility.kind)})'
-                                      '${_depots.isNotEmpty && _depots.last == facility.id ? ' · End' : ''}',
+                                        '${truck.plateNumber} (${pretty(truck.availability)})'),
+                                    Text(
+                                      truck.loadSummary,
+                                      style:
+                                          Theme.of(context).textTheme.bodySmall,
                                     ),
-                                    const SizedBox(height: 2),
-                                    TypeDots(facility.acceptedTypes, size: 8),
+                                    if (truck.garbageTypes.isNotEmpty)
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          TypeDots(truck.garbageTypes),
+                                          const SizedBox(width: 6),
+                                          Flexible(
+                                            child: Text(
+                                              truck.garbageTypes
+                                                  .map(pretty)
+                                                  .join(', '),
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodySmall,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                   ],
                                 ),
-                                selected: _depots.contains(facility.id),
+                              ),
+                          ],
+                          // Closed field stays a single plate line.
+                          selectedItemBuilder: (context) => [
+                            for (final truck in trucks)
+                              Text(
+                                  '${truck.plateNumber} (${pretty(truck.availability)})'),
+                          ],
+                          onChanged: (v) => setState(() {
+                            _truckId = v;
+                            _pickedTruck = null;
+                            for (final truck in trucks) {
+                              if (truck.id == v) _pickedTruck = truck;
+                            }
+                            // A new truck resets the selection to everything
+                            // it can carry.
+                            _selectedTypes = Set.of(
+                                _pickedTruck?.garbageTypes ?? garbageTypes);
+                          }),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          _CreateStep(
+            title: 'Depots',
+            subtitle: _depots.isEmpty ? null : '${_depots.length} picked',
+            content: Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Depots (pick at least one)',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Any facility can serve as a depot. Picks run in visit order; the last pick is the route end.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 12),
+                    FutureBuilder(
+                      future: auth.logistics.listFacilities(limit: 100),
+                      builder: (context, snapshot) => AsyncView<List<Facility>>(
+                        snapshot: snapshot,
+                        onRetry: () => setState(() {}),
+                        builder: (context, facilities) {
+                          if (facilities.isEmpty) {
+                            return const Text(
+                                'No facilities yet — register one first.');
+                          }
+
+                          return Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              for (final facility in facilities)
+                                FilterChip(
+                                  label: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '${facility.name} (${pretty(facility.kind)})'
+                                        '${_depots.isNotEmpty && _depots.last == facility.id ? ' · End' : ''}',
+                                      ),
+                                      const SizedBox(height: 2),
+                                      TypeDots(facility.acceptedTypes, size: 8),
+                                    ],
+                                  ),
+                                  selected: _depots.contains(facility.id),
+                                  onSelected: (on) => setState(() {
+                                    if (on) {
+                                      if (!_depots.contains(facility.id)) {
+                                        _depots.add(facility.id);
+                                      }
+                                    } else {
+                                      _depots.remove(facility.id);
+                                    }
+                                  }),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          _CreateStep(
+            title: 'Stops',
+            subtitle: _auto
+                ? 'Auto · ${_selectedTypes.length} types'
+                : 'Manual · ${_picked.length} posts',
+            content: Column(
+              children: [
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: SwitchListTile(
+                    title: const Text('Auto-generate stops'),
+                    subtitle:
+                        const Text('Nearest matching posts, within capacity'),
+                    value: _auto,
+                    onChanged: (v) => setState(() => _auto = v),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Posted garbage',
+                            style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 12),
+                        Text(
+                          _pickedTruck == null
+                              ? 'Showing all types — pick a truck to constrain by capability.'
+                              : 'Only types ${_pickedTruck!.plateNumber} can carry.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            for (final type
+                                in _pickedTruck?.garbageTypes ?? garbageTypes)
+                              FilterChip(
+                                label: Text(pretty(type)),
+                                avatar: TypeDot(type),
+                                selected: _selectedTypes.contains(type),
                                 onSelected: (on) => setState(() {
                                   if (on) {
-                                    if (!_depots.contains(facility.id)) {
-                                      _depots.add(facility.id);
-                                    }
+                                    _selectedTypes.add(type);
                                   } else {
-                                    _depots.remove(facility.id);
+                                    _selectedTypes.remove(type);
                                   }
                                 }),
                               ),
                           ],
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            margin: EdgeInsets.zero,
-            child: SwitchListTile(
-              title: const Text('Auto-generate stops'),
-              subtitle: const Text('Nearest matching posts, within capacity'),
-              value: _auto,
-              onChanged: (v) => setState(() => _auto = v),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            margin: EdgeInsets.zero,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Posted garbage',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 12),
-                  Text(
-                    _pickedTruck == null
-                        ? 'Showing all types — pick a truck to constrain by capability.'
-                        : 'Only types ${_pickedTruck!.plateNumber} can carry.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: [
-                      for (final type
-                          in _pickedTruck?.garbageTypes ?? garbageTypes)
-                        FilterChip(
-                          label: Text(pretty(type)),
-                          avatar: TypeDot(type),
-                          selected: _selectedTypes.contains(type),
-                          onSelected: (on) => setState(() {
-                            if (on) {
-                              _selectedTypes.add(type);
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Tip: tap a map pin to hand-pick that stop.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 8),
+                        _PostsMap(
+                          key: ValueKey((
+                            _typeKey,
+                            _truckId,
+                            _depots.isEmpty ? null : _depots.last,
+                          )),
+                          typeFilter: _selectedTypes,
+                          picked: _picked,
+                          polygonMode: _polygonMode,
+                          polygon: _polygon,
+                          truckId: _truckId,
+                          endDepotId: _depots.isEmpty ? null : _depots.last,
+                          fallbackCenter: viewport.center,
+                          fallbackZoom: viewport.zoom,
+                          tileProvider: widget.tileProvider,
+                          onTogglePost: (post) => setState(() {
+                            // A pin tap is a hand-pick: flip to manual (like a
+                            // closed polygon does) so the tap counts instead
+                            // of painting selection state auto mode ignores.
+                            _auto = false;
+                            if (_picked.contains(post.id)) {
+                              _picked.remove(post.id);
                             } else {
-                              _selectedTypes.remove(type);
+                              _picked.add(post.id);
                             }
                           }),
+                          onAddVertex: (point) => setState(() {
+                            _polygonClosed = false;
+                            _polygon.add(point);
+                          }),
                         ),
-                    ],
+                        _PolygonPanel(
+                          key: ValueKey(('polygon', _typeKey)),
+                          typeFilter: _selectedTypes,
+                          polygonMode: _polygonMode,
+                          polygon: _polygon,
+                          polygonClosed: _polygonClosed,
+                          onToggleMode: (v) => setState(() => _polygonMode = v),
+                          onUndo: () => setState(() {
+                            if (_polygon.isNotEmpty) _polygon.removeLast();
+                            _polygonClosed = false;
+                          }),
+                          onClear: () => setState(() {
+                            _polygon.clear();
+                            _polygonClosed = false;
+                          }),
+                          onEdit: () => setState(() => _polygonClosed = false),
+                          onClose: (enclosedIds) {
+                            if (enclosedIds.isEmpty) {
+                              showError(
+                                  context, 'No posted garbage inside the area');
+                              return;
+                            }
+                            setState(() {
+                              _polygonClosed = true;
+                              // The drawn area submits through the manual path.
+                              _auto = false;
+                              _picked
+                                ..clear()
+                                ..addAll(enclosedIds);
+                            });
+                          },
+                        ),
+                      ],
+                    ),
                   ),
+                ),
+                if (!_auto) ...[
                   const SizedBox(height: 12),
-                  _PostsMap(
-                    key: ValueKey((
-                      _typeKey,
-                      _truckId,
-                      _depots.isEmpty ? null : _depots.last,
-                    )),
+                  Text('Pick posts',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  _PostsList(
+                    key: ValueKey(('list', _typeKey)),
                     typeFilter: _selectedTypes,
                     picked: _picked,
-                    collectionPoints: _collectionPoints,
-                    addPointsMode: _addPointsMode,
-                    polygonMode: _polygonMode,
-                    polygon: _polygon,
-                    truckId: _truckId,
-                    endDepotId: _depots.isEmpty ? null : _depots.last,
-                    fallbackCenter: viewport.center,
-                    fallbackZoom: viewport.zoom,
-                    tileProvider: widget.tileProvider,
-                    onTogglePost: (post) => setState(() {
-                      if (_picked.contains(post.id)) {
-                        _picked.remove(post.id);
-                      } else {
+                    onToggle: (post, on) => setState(() {
+                      if (on) {
                         _picked.add(post.id);
+                      } else {
+                        _picked.remove(post.id);
                       }
                     }),
-                    onAddPoint: (point) =>
-                        setState(() => _collectionPoints.add(point)),
-                    onAddVertex: (point) => setState(() {
-                      _polygonClosed = false;
-                      _polygon.add(point);
-                    }),
                   ),
-                  _PolygonPanel(
-                    key: ValueKey(('polygon', _typeKey)),
-                    typeFilter: _selectedTypes,
-                    polygonMode: _polygonMode,
-                    polygon: _polygon,
-                    polygonClosed: _polygonClosed,
-                    onToggleMode: (v) => setState(() {
-                      _polygonMode = v;
-                      // Draw mode and tap-to-add mode are mutually exclusive.
-                      if (v) _addPointsMode = false;
-                    }),
-                    onUndo: () => setState(() {
-                      if (_polygon.isNotEmpty) _polygon.removeLast();
-                      _polygonClosed = false;
-                    }),
-                    onClear: () => setState(() {
-                      _polygon.clear();
-                      _polygonClosed = false;
-                    }),
-                    onEdit: () => setState(() => _polygonClosed = false),
-                    onClose: (enclosedIds) {
-                      if (enclosedIds.isEmpty) {
-                        showError(context, 'No posted garbage inside the area');
-                        return;
-                      }
-                      setState(() {
-                        _polygonClosed = true;
-                        // The drawn area submits through the manual path.
-                        _auto = false;
-                        _picked
-                          ..clear()
-                          ..addAll(enclosedIds);
-                      });
-                    },
+                ],
+              ],
+            ),
+          ),
+          _CreateStep(
+            title: 'Review',
+            content: _ReviewStep(
+              truck: _pickedTruck,
+              scheduledFor: _scheduledFor,
+              auto: _auto,
+              selectedTypes: _selectedTypes,
+              pickedCount: _picked.length,
+              depotIds: _depots,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One creation step: a tappable numbered header plus its content.
+///
+/// Unlike Material's [Stepper] (which keeps every step's content mounted
+/// inside an [AnimatedCrossFade]), only the active step's content is in
+/// the tree — inactive steps cost no fetches and can't confuse finders.
+class _CreateStep {
+  const _CreateStep(
+      {required this.title, this.subtitle, required this.content});
+
+  final String title;
+  final String? subtitle;
+  final Widget content;
+}
+
+class _CreateStepper extends StatelessWidget {
+  const _CreateStepper({
+    required this.step,
+    required this.onStepTapped,
+    required this.controls,
+    required this.steps,
+  });
+
+  final int step;
+  final ValueChanged<int> onStepTapped;
+  final Widget controls;
+  final List<_CreateStep> steps;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        for (var i = 0; i < steps.length; i++) ...[
+          InkWell(
+            onTap: () => onStepTapped(i),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 14,
+                    backgroundColor: i < step
+                        ? scheme.primary
+                        : i == step
+                            ? scheme.primaryContainer
+                            : scheme.surfaceContainerHighest,
+                    child: i < step
+                        ? Icon(Icons.check, size: 16, color: scheme.onPrimary)
+                        : Text(
+                            '${i + 1}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: i == step
+                                  ? scheme.onPrimaryContainer
+                                  : scheme.onSurfaceVariant,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Tap map to add collection points'),
-                    subtitle: Text(_addPointsMode
-                        ? 'Map taps place a collection point.'
-                        : 'Pin taps ${_auto ? 'highlight posts' : 'select stops'}.'),
-                    value: _addPointsMode,
-                    onChanged: (v) => setState(() {
-                      _addPointsMode = v;
-                      if (v) _polygonMode = false;
-                    }),
-                  ),
-                  if (_collectionPoints.isNotEmpty) ...[
-                    Text(
-                      'Collection points (${_collectionPoints.length})',
-                      style: Theme.of(context).textTheme.titleSmall,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          steps[i].title,
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        if (steps[i].subtitle != null)
+                          Text(
+                            steps[i].subtitle!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
                     ),
-                    const SizedBox(height: 4),
-                    for (var i = 0; i < _collectionPoints.length; i++)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        dense: true,
-                        leading: Icon(
-                          Icons.flag,
-                          color: Theme.of(context).colorScheme.tertiary,
-                        ),
-                        title: Text(_collectionPoints[i].short),
-                        trailing: IconButton(
-                          tooltip: 'Remove collection point',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () =>
-                              setState(() => _collectionPoints.removeAt(i)),
-                        ),
-                      ),
-                  ],
+                  ),
                 ],
               ),
             ),
           ),
-          if (!_auto) ...[
-            const SizedBox(height: 12),
-            Text('Pick posts', style: Theme.of(context).textTheme.titleMedium),
+          if (i == step) ...[
             const SizedBox(height: 8),
-            _PostsList(
-              key: ValueKey(('list', _typeKey)),
-              typeFilter: _selectedTypes,
-              picked: _picked,
-              onToggle: (post, on) => setState(() {
-                if (on) {
-                  _picked.add(post.id);
-                } else {
-                  _picked.remove(post.id);
-                }
-              }),
-            ),
+            steps[i].content,
+            controls,
           ],
-          const SizedBox(height: 16),
+          if (i < steps.length - 1) const Divider(height: 24),
+        ],
+      ],
+    );
+  }
+}
+
+/// Back/Continue controls under the active step; the last step assigns.
+class _StepControls extends StatelessWidget {
+  const _StepControls({
+    required this.step,
+    required this.busy,
+    required this.onBack,
+    required this.onNext,
+  });
+
+  final int step;
+  final bool busy;
+  final VoidCallback onBack;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    final last = step == 3;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        children: [
+          if (step > 0)
+            TextButton(
+              onPressed: busy ? null : onBack,
+              child: const Text('Back'),
+            ),
           FilledButton(
-            onPressed: _busy ? null : _submit,
-            child: _busy
+            onPressed: busy ? null : onNext,
+            child: busy && last
                 ? const SizedBox(
-                    width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Assign route'),
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(last ? 'Assign route' : 'Continue'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Review step: the whole run on one card before assigning. Depot names
+/// resolve from the facility listing so logistics can verify the visit
+/// order (last pick ends the route) at a glance.
+class _ReviewStep extends StatelessWidget {
+  const _ReviewStep({
+    required this.truck,
+    required this.scheduledFor,
+    required this.auto,
+    required this.selectedTypes,
+    required this.pickedCount,
+    required this.depotIds,
+  });
+
+  final Truck? truck;
+  final DateTime scheduledFor;
+  final bool auto;
+  final Set<String> selectedTypes;
+  final int pickedCount;
+  final List<String> depotIds;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = truck;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InfoRow(
+              label: 'Truck',
+              value: current == null
+                  ? 'No truck picked'
+                  : '${current.plateNumber} (${pretty(current.availability)})',
+            ),
+            InfoRow(label: 'Day', value: formatDay(scheduledFor)),
+            InfoRow(
+              label: 'Stops',
+              value: auto
+                  ? (selectedTypes.isEmpty
+                          ? 'Auto · no types picked'
+                          : 'Auto · ${selectedTypes.map(pretty).join(', ')}') +
+                      (pickedCount > 0
+                          ? ' · $pickedCount picked posts ignored'
+                          : '')
+                  : 'Manual · $pickedCount posts',
+            ),
+            FutureBuilder(
+              future: context.read<AuthProvider>().logistics.listFacilities(),
+              builder: (context, snapshot) => AsyncView<List<Facility>>(
+                snapshot: snapshot,
+                builder: (context, facilities) {
+                  final names = {
+                    for (final facility in facilities)
+                      facility.id: facility.name,
+                  };
+                  final known = [
+                    for (final id in depotIds)
+                      if (names.containsKey(id)) names[id]!,
+                  ];
+                  return InfoRow(
+                    label: 'Depots',
+                    value: known.isEmpty
+                        ? (depotIds.isEmpty
+                            ? 'No depots picked'
+                            : '${depotIds.length} picked')
+                        : [
+                            ...known.take(known.length - 1),
+                            '${known.last} · End',
+                          ].join(', '),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -529,8 +767,8 @@ Future<_MapData> _loadMapData(
 }
 
 /// Clustered map of posted garbage. Tapping a pin toggles selection (unless
-/// a draw mode is on); tapping empty map area adds a collection point when
-/// [addPointsMode] is on, or a polygon vertex when [polygonMode] is on.
+/// draw mode is on); tapping empty map area adds a polygon vertex when
+/// [polygonMode] is on, and does nothing otherwise.
 ///
 /// The load future is created once per [key]: vertex taps, picks, and mode
 /// toggles rebuild with the same future so the map element (and its camera)
@@ -540,8 +778,6 @@ class _PostsMap extends StatefulWidget {
     super.key,
     required this.typeFilter,
     required this.picked,
-    required this.collectionPoints,
-    required this.addPointsMode,
     required this.polygonMode,
     required this.polygon,
     required this.truckId,
@@ -549,15 +785,12 @@ class _PostsMap extends StatefulWidget {
     required this.fallbackCenter,
     required this.fallbackZoom,
     required this.onTogglePost,
-    required this.onAddPoint,
     required this.onAddVertex,
     this.tileProvider,
   });
 
   final Set<String> typeFilter;
   final Set<String> picked;
-  final List<GeoPoint> collectionPoints;
-  final bool addPointsMode;
   final bool polygonMode;
   final List<GeoPoint> polygon;
   final String? truckId;
@@ -565,7 +798,6 @@ class _PostsMap extends StatefulWidget {
   final LatLng fallbackCenter;
   final double fallbackZoom;
   final ValueChanged<GarbagePost> onTogglePost;
-  final ValueChanged<GeoPoint> onAddPoint;
   final ValueChanged<GeoPoint> onAddVertex;
   final TileProvider? tileProvider;
 
@@ -600,7 +832,6 @@ class _PostsMapState extends State<_PostsMap> {
           final endDepot = data.endDepot;
           final polygon = widget.polygon;
           if (posts.isEmpty &&
-              widget.collectionPoints.isEmpty &&
               truckStart == null &&
               endDepot == null &&
               polygon.isEmpty) {
@@ -632,14 +863,6 @@ class _PostsMapState extends State<_PostsMap> {
                       '${post.types.map(pretty).join(', ')} · ${post.district ?? 'No district'}',
                   clusterGroup: MarkerGroups.garbage,
                 ),
-              for (final point in widget.collectionPoints)
-                MapMarkerData(
-                  point: point,
-                  icon: Icons.flag,
-                  color: scheme.tertiary,
-                  label: 'Collection point',
-                  clusterGroup: MarkerGroups.collectionPoint,
-                ),
               if (truckStart != null)
                 MapMarkerData(
                   point: truckStart,
@@ -667,9 +890,9 @@ class _PostsMapState extends State<_PostsMap> {
                 ),
             ],
             polygons: polygon.length >= 3 ? [List.of(polygon)] : const [],
-            // In draw modes marker taps are disabled so a pin tap can never
-            // also drop a point underneath it.
-            onMarkerTap: (widget.addPointsMode || widget.polygonMode)
+            // In draw mode marker taps are disabled so a pin tap can never
+            // also drop a vertex underneath it.
+            onMarkerTap: widget.polygonMode
                 ? null
                 : (index) {
                     if (index < posts.length) {
@@ -678,9 +901,7 @@ class _PostsMapState extends State<_PostsMap> {
                   },
             onMapTap: widget.polygonMode
                 ? (ll) => widget.onAddVertex(ll.geoPoint)
-                : (widget.addPointsMode
-                    ? (ll) => widget.onAddPoint(ll.geoPoint)
-                    : null),
+                : null,
           );
         },
       ),
@@ -786,8 +1007,8 @@ class _PolygonPanelState extends State<_PolygonPanel> {
                       const SizedBox(height: 8),
                       FilledButton(
                         onPressed: polygon.length >= 3
-                            ? () => widget
-                                .onClose([for (final p in enclosed) p.id])
+                            ? () =>
+                                widget.onClose([for (final p in enclosed) p.id])
                             : null,
                         child: const Text('Close shape'),
                       ),

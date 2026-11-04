@@ -63,8 +63,10 @@ Widget _withAuth(AuthProvider auth, Widget home) =>
       child: MaterialApp(theme: AppTheme.light, home: home),
     );
 
-Map<String, dynamic> _postJson(String id, String? district, double lng, double lat,
-        {List<String> types = const ['plastic']}) => {
+Map<String, dynamic> _postJson(
+        String id, String? district, double lng, double lat,
+        {List<String> types = const ['plastic']}) =>
+    {
       'id': id,
       'user_id': 'u9',
       'location': {
@@ -168,8 +170,9 @@ MockClient _routeBackend({
       return http.Response(jsonEncode(posts), 200);
     }
     if (request.method == 'POST' && path == '/api/v1/logistics/routes') {
-      onRouteBody?.call()?.addAll(
-          jsonDecode(request.body) as Map<String, dynamic>);
+      onRouteBody
+          ?.call()
+          ?.addAll(jsonDecode(request.body) as Map<String, dynamic>);
       return http.Response(jsonEncode(_routeJson()), 200);
     }
     return http.Response('not found: $path', 404);
@@ -182,8 +185,7 @@ MockClient _routeBackend({
 Future<void> _scrollTo(WidgetTester tester, Finder finder) async {
   Future<void> sweep(Offset delta) async {
     final rect = tester.getRect(find.byType(ListView).first);
-    await tester.dragFrom(
-        Offset(rect.right - 4, rect.center.dy), delta);
+    await tester.dragFrom(Offset(rect.right - 4, rect.center.dy), delta);
     await tester.pumpAndSettle();
   }
 
@@ -202,6 +204,14 @@ Future<void> _selectTruck(WidgetTester tester) async {
   await tester.tap(find.byType(DropdownButtonFormField<String>));
   await tester.pumpAndSettle();
   await tester.tap(find.text('ABC-123 (Available)').last);
+  await tester.pumpAndSettle();
+}
+
+/// Jumps to a creation step by tapping its header. Headers precede
+/// contents in tree order, so `.first` wins over same-named review rows.
+Future<void> _goToStep(WidgetTester tester, String title) async {
+  await _scrollTo(tester, find.text(title));
+  await tester.tap(find.text(title).first);
   await tester.pumpAndSettle();
 }
 
@@ -315,7 +325,8 @@ void main() {
   });
 
   group('GarbageMapView clustering and viewport', () {
-    testWidgets('clustered identical pins render one count badge', (tester) async {
+    testWidgets('clustered identical pins render one count badge',
+        (tester) async {
       final point = GeoPoint(longitude: 3.37, latitude: 6.45);
       await tester.pumpWidget(
         MaterialApp(
@@ -362,9 +373,8 @@ void main() {
       expect(find.byType(ClusterBadge), findsNWidgets(2));
       expect(find.byTooltip('2 posts'), findsOneWidget);
       expect(find.byTooltip('2 depots'), findsOneWidget);
-      final badges = tester
-          .widgetList<ClusterBadge>(find.byType(ClusterBadge))
-          .toList();
+      final badges =
+          tester.widgetList<ClusterBadge>(find.byType(ClusterBadge)).toList();
       expect(badges[0].color, isNot(badges[1].color));
       expect(find.byType(MapPin), findsNothing);
     });
@@ -437,8 +447,7 @@ void main() {
           home: Scaffold(
             body: GarbageMapView(
               markers: [
-                MapMarkerData(
-                    point: GeoPoint(longitude: 3.37, latitude: 6.45)),
+                MapMarkerData(point: GeoPoint(longitude: 3.37, latitude: 6.45)),
                 MapMarkerData(
                     point: GeoPoint(longitude: -98.58, latitude: 39.83)),
               ],
@@ -481,9 +490,11 @@ void main() {
   group('registration country', () {
     testWidgets('empty country blocks submit', (tester) async {
       final auth = AuthProvider(
-        client: ApiClient(baseUrl: 'http://x', httpClient: MockClient(
-          (_) async => http.Response('should not be called', 500),
-        )),
+        client: ApiClient(
+            baseUrl: 'http://x',
+            httpClient: MockClient(
+              (_) async => http.Response('should not be called', 500),
+            )),
       );
       await tester.pumpWidget(_withAuth(auth, const RegisterScreen()));
       await tester.pumpAndSettle();
@@ -593,7 +604,8 @@ void main() {
       );
       await tester.pumpWidget(_withAuth(auth, const PostsScreen()));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(FloatingActionButton, 'Report'), findsOneWidget);
+      expect(
+          find.widgetWithText(FloatingActionButton, 'Report'), findsOneWidget);
       expect(find.text('Report garbage'), findsOneWidget);
     });
 
@@ -617,7 +629,8 @@ void main() {
             }
             return http.Response(jsonEncode(location), 200);
           }
-          if (request.method == 'GET' && request.url.path == '/api/v1/garbage') {
+          if (request.method == 'GET' &&
+              request.url.path == '/api/v1/garbage') {
             return http.Response(jsonEncode([]), 200);
           }
           return http.Response(jsonEncode({'detail': 'not found'}), 404);
@@ -657,13 +670,11 @@ void main() {
           httpClient: MockClient((request) async {
             if (request.method == 'GET' &&
                 request.url.path == '/api/v1/users/u1/location') {
-              return http.Response(
-                  jsonEncode(_locationJson(3.37, 6.45)), 200);
+              return http.Response(jsonEncode(_locationJson(3.37, 6.45)), 200);
             }
             if (request.method == 'POST' &&
                 request.url.path == '/api/v1/garbage') {
-              submitted =
-                  jsonDecode(request.body) as Map<String, dynamic>;
+              submitted = jsonDecode(request.body) as Map<String, dynamic>;
               return http.Response(
                   jsonEncode(_postJson('p9', null, 3.37, 6.45)), 201);
             }
@@ -708,19 +719,18 @@ void main() {
           if (request.method == 'GET' &&
               request.url.path == '/api/v1/users/u1/location') {
             if (location == null) {
-              return http.Response(
-                  jsonEncode({'detail': 'not found'}), status);
+              return http.Response(jsonEncode({'detail': 'not found'}), status);
             }
             return http.Response(jsonEncode(location), 200);
           }
-          if (request.method == 'GET' && request.url.path == '/api/v1/garbage') {
+          if (request.method == 'GET' &&
+              request.url.path == '/api/v1/garbage') {
             return http.Response(jsonEncode([]), 200);
           }
           return http.Response(jsonEncode({'detail': 'not found'}), 404);
         });
 
-    AuthProvider gateAuth(
-            {Map<String, dynamic>? location, int status = 404}) =>
+    AuthProvider gateAuth({Map<String, dynamic>? location, int status = 404}) =>
         AuthProvider.withUser(
           _user('resident'),
           client: ApiClient(
@@ -734,8 +744,7 @@ void main() {
       await tester.pumpWidget(_withAuth(gateAuth(), const HomeScreen()));
       await tester.pumpAndSettle();
       expect(find.text('Set collection point'), findsOneWidget);
-      expect(
-          find.text('Where should collectors pick up your garbage?'),
+      expect(find.text('Where should collectors pick up your garbage?'),
           findsOneWidget);
       expect(find.text('Report garbage'), findsNothing);
     });
@@ -750,8 +759,8 @@ void main() {
     });
 
     testWidgets('gate fails open when the check errors', (tester) async {
-      await tester.pumpWidget(
-          _withAuth(gateAuth(status: 500), const HomeScreen()));
+      await tester
+          .pumpWidget(_withAuth(gateAuth(status: 500), const HomeScreen()));
       await tester.pumpAndSettle();
       expect(find.text('Report garbage'), findsOneWidget);
     });
@@ -776,8 +785,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       await _selectTruck(tester);
-      await _scrollTo(tester, find.text('Assign route'));
-      await tester.tap(find.text('Assign route'));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
       expect(find.text('Pick at least one depot'), findsOneWidget);
     });
@@ -822,6 +832,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       // Manual mode shows the checkbox list.
+      await _goToStep(tester, 'Stops');
       await _scrollTo(tester, find.byType(SwitchListTile));
       await tester.tap(find.byType(SwitchListTile).first);
       await tester.pumpAndSettle();
@@ -863,13 +874,15 @@ void main() {
       );
       await tester.pumpAndSettle();
       // Without a truck every type is offered.
+      await _goToStep(tester, 'Stops');
       await _scrollTo(tester, find.widgetWithText(FilterChip, 'Organic'));
       expect(find.widgetWithText(FilterChip, 'Organic'), findsOneWidget);
 
+      await _goToStep(tester, 'Truck & day');
       await _selectTruck(tester);
       // The mock truck carries plastic and paper only.
-      await _scrollTo(
-          tester, find.text('Only types ABC-123 can carry.'));
+      await _goToStep(tester, 'Stops');
+      await _scrollTo(tester, find.text('Only types ABC-123 can carry.'));
       expect(find.text('Only types ABC-123 can carry.'), findsOneWidget);
       expect(find.widgetWithText(FilterChip, 'Plastic'), findsOneWidget);
       expect(find.widgetWithText(FilterChip, 'Paper'), findsOneWidget);
@@ -879,9 +892,11 @@ void main() {
       await _scrollTo(tester, find.widgetWithText(FilterChip, 'Paper'));
       await tester.tap(find.widgetWithText(FilterChip, 'Paper'));
       await tester.pumpAndSettle();
+      await _goToStep(tester, 'Depots');
       await _scrollTo(tester, find.text('North Depot (Dump Site)'));
       await tester.tap(find.text('North Depot (Dump Site)'));
       await tester.pumpAndSettle();
+      await _goToStep(tester, 'Review');
       await _scrollTo(tester, find.text('Assign route'));
       await tester.tap(find.text('Assign route'));
       await tester.pumpAndSettle();
@@ -904,54 +919,10 @@ void main() {
         _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
+      await _goToStep(tester, 'Stops');
       await _scrollTo(tester, find.byType(FlutterMap));
       expect(find.byType(ClusterBadge), findsOneWidget);
       expect(find.text('2'), findsOneWidget);
-    });
-
-    testWidgets('tap-to-add collection point lands in the submit body',
-        (tester) async {
-      final submitted = <String, dynamic>{};
-      final auth = AuthProvider.withUser(
-        _user('logistics', country: 'Nigeria'),
-        client: ApiClient(
-          baseUrl: 'http://x',
-          httpClient: _routeBackend(
-            posts: posts,
-            onRouteBody: () => submitted,
-          ),
-        ),
-      );
-      await tester.pumpWidget(
-        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
-      );
-      await tester.pumpAndSettle();
-      await _selectTruck(tester);
-      await _scrollTo(tester, find.text('North Depot (Dump Site)'));
-      await tester.tap(find.text('North Depot (Dump Site)'));
-      await tester.pumpAndSettle();
-
-      // Enable tap-to-add mode and tap the map.
-      await _scrollTo(tester, find.text('Tap map to add collection points'));
-      await tester.tap(find.byType(SwitchListTile).last);
-      await tester.pumpAndSettle();
-      await _scrollTo(tester, find.byType(FlutterMap));
-      await tester.tap(find.byType(FlutterMap));
-      // Single taps wait out the double-tap timeout.
-      await tester.pump(const Duration(milliseconds: 500));
-      await tester.pumpAndSettle();
-      expect(find.text('Collection points (1)'), findsOneWidget);
-
-      await _scrollTo(tester, find.text('Assign route'));
-      await tester.tap(find.text('Assign route'));
-      await tester.pumpAndSettle();
-
-      expect(submitted['truck_id'], 't1');
-      expect(submitted['depot_ids'], ['f1']);
-      expect((submitted['collection_points'] as List), hasLength(1));
-      final point =
-          (submitted['collection_points'] as List).single as Map<String, dynamic>;
-      expect(point.keys, containsAll(['longitude', 'latitude']));
     });
 
     testWidgets('map pin tap toggles the manual selection', (tester) async {
@@ -966,6 +937,7 @@ void main() {
         _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
+      await _goToStep(tester, 'Stops');
       await _scrollTo(tester, find.byType(SwitchListTile));
       await tester.tap(find.byType(SwitchListTile).first);
       await tester.pumpAndSettle();
