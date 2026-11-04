@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     # Optional self-hosted OSRM server (e.g. http://localhost:5000). When set,
     # road geometry is requested from OSRM first, then OSMnx, then straight lines.
     osrm_base_url: str | None = None
+    # Trained classifier bundle from scripts/train_classifier.py. When unset
+    # (or the file is missing), image classification answers 503 instead of
+    # guessing; description matching still works.
+    ai_weights_path: str | None = None
 
     @field_validator("jwt_secret_key")
     @classmethod
