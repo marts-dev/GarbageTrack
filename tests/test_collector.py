@@ -324,6 +324,51 @@ def test_finish_route_closes_run_and_frees_truck(
     assert again.status_code == 404
 
 
+def test_start_route_flips_assigned_to_in_progress(client, dispatcher, collector, make_user):
+    resident = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    post = _make_post(client, resident)
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    route = _make_route(client, dispatcher["headers"], truck["id"], depot["id"], [post["id"]])
+    assert route["status"] == "assigned"
+
+    started = client.post(
+        f"/api/v1/trucks/{truck['id']}/start-route", headers=collector["headers"]
+    )
+    assert started.status_code == 200, started.text
+
+    reread = client.get(
+        f"/api/v1/logistics/routes/{route['id']}", headers=dispatcher["headers"]
+    )
+    assert reread.json()["status"] == "in_progress"
+
+    # Starting again has nothing assigned.
+    again = client.post(
+        f"/api/v1/trucks/{truck['id']}/start-route", headers=collector["headers"]
+    )
+    assert again.status_code == 404
+
+
+def test_start_route_requires_binding(client, dispatcher, collector, make_user):
+    other = make_user("collector")
+    truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    response = client.post(
+        f"/api/v1/trucks/{truck['id']}/start-route", headers=other["headers"]
+    )
+    assert response.status_code == 403
+
+
+def test_start_route_without_assigned_route_is_404(client, dispatcher, collector):
+    truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    response = client.post(
+        f"/api/v1/trucks/{truck['id']}/start-route", headers=collector["headers"]
+    )
+    assert response.status_code == 404
+
+
 def test_collector_routes_require_collector_role(client, dispatcher, make_user):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"])
@@ -344,10 +389,17 @@ def test_collector_routes_require_collector_role(client, dispatcher, make_user):
         ).status_code
         == 403
     )
+    assert (
+        client.post(
+            f"/api/v1/trucks/{truck['id']}/start-route",
+            headers=resident["headers"],
+        ).status_code
+        == 403
+    )
     assert client.get(f"/api/v1/trucks/{truck['id']}/route").status_code == 401
 
 
-@pytest.mark.parametrize("route", ["route", "collect-vicinity", "finish-route"])
+@pytest.mark.parametrize("route", ["route", "collect-vicinity", "finish-route", "start-route"])
 def test_collector_routes_reject_unknown_truck(client, collector, route):
     if route == "route":
         response = client.get(
@@ -359,9 +411,14 @@ def test_collector_routes_reject_unknown_truck(client, collector, route):
             json={},
             headers=collector["headers"],
         )
-    else:
+    elif route == "finish-route":
         response = client.post(
             "/api/v1/trucks/000000000000000000000000/finish-route",
+            headers=collector["headers"],
+        )
+    else:
+        response = client.post(
+            "/api/v1/trucks/000000000000000000000000/start-route",
             headers=collector["headers"],
         )
     assert response.status_code == 404

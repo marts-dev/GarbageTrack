@@ -70,6 +70,10 @@ class NoActiveRouteError(Exception):
     pass
 
 
+class NoAssignedRouteError(Exception):
+    pass
+
+
 class EmptyUpdateError(Exception):
     pass
 
@@ -629,4 +633,33 @@ async def finish_active_route(
             {"$set": {"availability": TruckAvailability.AVAILABLE.value}},
         )
         truck_doc["availability"] = TruckAvailability.AVAILABLE.value
+    return _to_response(truck_doc)
+
+
+async def start_assigned_route(
+    db: AsyncDatabase, truck_id: str, user: object | None = None
+) -> TruckResponse:
+    """Start the truck's run: assigned routes go in progress.
+
+    The collector taps this when leaving, so residents see the truck coming
+    before the first pickup. First-collect auto-start stays as a fallback
+    for runs started implicitly; both flip the same assigned set.
+    """
+    truck_doc = await _get_truck_doc(db, truck_id)
+    _require_operator_binding(truck_doc, user)
+    assigned = await db[route_model.COLLECTION].find_one(
+        {
+            "truck_id": truck_doc["_id"],
+            "status": PlannedRouteStatus.ASSIGNED.value,
+        }
+    )
+    if assigned is None:
+        raise NoAssignedRouteError(truck_id)
+    await db[route_model.COLLECTION].update_many(
+        {
+            "truck_id": truck_doc["_id"],
+            "status": PlannedRouteStatus.ASSIGNED.value,
+        },
+        {"$set": {"status": PlannedRouteStatus.IN_PROGRESS.value}},
+    )
     return _to_response(truck_doc)

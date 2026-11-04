@@ -22,6 +22,7 @@ from app.services import trucks as trucks_service
 from app.services.trucks import (
     EmptyUpdateError,
     NoActiveRouteError,
+    NoAssignedRouteError,
     NoPlannedRouteError,
     TruckHasRoutesError,
     TruckLocationUnknownError,
@@ -195,6 +196,21 @@ async def finish_route(truck_id: str, user: Collector, db: Db):
     except NoActiveRouteError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="truck has no active route"
+        ) from None
+
+
+@router.post("/{truck_id}/start-route", response_model=TruckResponse)
+async def start_route(truck_id: str, user: Collector, db: Db):
+    """Start the truck's run: assigned routes go in progress."""
+    try:
+        return await trucks_service.start_assigned_route(db, truck_id, user)
+    except TruckNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
+    except TruckNotAssignedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from None
+    except NoAssignedRouteError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="truck has no assigned route"
         ) from None
 
 

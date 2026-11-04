@@ -66,7 +66,6 @@ class TruckDetailBody extends StatefulWidget {
 }
 
 class _TruckDetailBodyState extends State<TruckDetailBody> {
-  int _routeReload = 0;
   bool _busy = false;
 
   /// Hoisted truck future: creating it in [build] would resubscribe the
@@ -81,10 +80,18 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
   /// share/status/collect action.
   Truck? _freshTruck;
 
+  /// Hoisted like [_truckFuture]: the header's Start/Finish button and
+  /// the route tab share this one plan fetch, and recreating it in [build]
+  /// would refetch on every [setState]. Replaced on truck switches,
+  /// retries, starts, finishes, and collects — never on location pings,
+  /// so the loaded route is never disturbed.
+  late Future<PlannedRoute?> _planFuture;
+
   @override
   void initState() {
     super.initState();
     _truckFuture = _fetchTruck();
+    _planFuture = _fetchPlan();
   }
 
   @override
@@ -93,11 +100,15 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
     if (widget.truckId != oldWidget.truckId) {
       _freshTruck = null;
       _truckFuture = _fetchTruck();
+      _planFuture = _fetchPlan();
     }
   }
 
   Future<Truck> _fetchTruck() =>
       context.read<AuthProvider>().trucks.getTruck(widget.truckId);
+
+  Future<PlannedRoute?> _fetchPlan() =>
+      context.read<AuthProvider>().trucks.getPlannedRoute(widget.truckId);
 
   Future<void> _shareLocation() async {
     final api = context.read<AuthProvider>().trucks;
@@ -116,6 +127,46 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
         // Header only: the ping must not re-anchor the loaded route, so
         // the route tab is deliberately left untouched here.
         setState(() => _freshTruck = truck);
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// Starts the truck's run: assigned routes go in progress so residents
+  /// see the truck coming before the first pickup.
+  Future<void> _startRoute() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Start run?'),
+        content: const Text(
+            'This marks the run in progress. Residents will see the truck enroute.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Start'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final truck =
+          await context.read<AuthProvider>().trucks.startRoute(widget.truckId);
+      if (mounted) {
+        showOk(context, 'Run started.');
+        setState(() {
+          _freshTruck = truck;
+          _planFuture = _fetchPlan();
+        });
       }
     } catch (e) {
       if (mounted) showError(context, e);
@@ -158,7 +209,7 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
         // the rest of the tab state is kept.
         setState(() {
           _freshTruck = truck;
-          _routeReload++;
+          _planFuture = _fetchPlan();
         });
       }
     } catch (e) {
@@ -177,13 +228,15 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
       if (!mounted) return;
       setState(() {
         _freshTruck = truck;
-        _routeReload++;
+        _planFuture = _fetchPlan();
       });
     } catch (_) {
       // The collect itself already succeeded (its result card shows in
       // the tab); still refetch the route, which surfaces its own error
       // UI if the network is actually down.
-      if (mounted) setState(() => _routeReload++);
+      if (mounted) {
+        setState(() => _planFuture = _fetchPlan());
+      }
     }
   }
 
@@ -197,6 +250,7 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
         onRetry: () => setState(() {
           _freshTruck = null;
           _truckFuture = _fetchTruck();
+          _planFuture = _fetchPlan();
         }),
         builder: (context, loaded) {
           final truck = _freshTruck ?? loaded;
@@ -258,17 +312,35 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                                         const Icon(Icons.my_location_outlined),
                                     label: const Text('Share my location'),
                                   ),
-                                // A working truck has an active run.
-                                // Collectors see this only on their own
-                                // truck; the API also rejects other
-                                // operators with 403.
+                                // One run button per state: assigned runs
+                                // start, anything else finishes. Collectors
+                                // see this only on their own truck; the API
+                                // also rejects other operators with 403.
+                                // While the status loads (or when the run
+                                // is unknown) the slot keeps Finish, the
+                                // long-standing action.
                                 if (truck.availability == 'working' &&
                                     (auth.user?.isCollector != true ||
                                         truck.isOperatedBy(auth.user!.id)))
-                                  FilledButton.tonalIcon(
-                                    onPressed: _busy ? null : _finishRoute,
-                                    icon: const Icon(Icons.flag_outlined),
-                                    label: const Text('Finish run'),
+                                  FutureBuilder(
+                                    future: _planFuture,
+                                    builder: (context, snapshot) {
+                                      final assigned =
+                                          snapshot.data?.status == 'assigned';
+                                      return FilledButton.tonalIcon(
+                                        onPressed: _busy
+                                            ? null
+                                            : (assigned
+                                                ? _startRoute
+                                                : _finishRoute),
+                                        icon: Icon(assigned
+                                            ? Icons.play_arrow_outlined
+                                            : Icons.flag_outlined),
+                                        label: Text(assigned
+                                            ? 'Start run'
+                                            : 'Finish run'),
+                                      );
+                                    },
                                   ),
                               ],
                             ),
@@ -303,8 +375,10 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                     children: [
                       _RouteTab(
                         truck: truck,
+                        routeFuture: _planFuture,
+                        onRetry: () =>
+                            setState(() => _planFuture = _fetchPlan()),
                         tileProvider: widget.tileProvider,
-                        extraReload: _routeReload,
                       ),
                       _CollectTab(
                         truck: truck,
@@ -363,48 +437,29 @@ class _AssignmentRow extends StatelessWidget {
 }
 
 class _RouteTab extends StatefulWidget {
-  const _RouteTab(
-      {required this.truck, this.tileProvider, required this.extraReload});
+  const _RouteTab({
+    required this.truck,
+    required this.routeFuture,
+    required this.onRetry,
+    this.tileProvider,
+  });
   final Truck truck;
-  final TileProvider? tileProvider;
 
-  /// Bumped by the parent when the route must refetch (collect,
-  /// availability) so collected stops drop out. Location pings
-  /// deliberately leave it alone so the loaded route is never disturbed.
-  final int extraReload;
+  /// The parent's hoisted plan future, shared with the header's
+  /// Start/Finish button so one request feeds both. The parent replaces it
+  /// on truck switches, reloads, and retries; location pings deliberately
+  /// leave it alone so the loaded route is never disturbed.
+  final Future<PlannedRoute?> routeFuture;
+
+  /// Asks the parent for a fresh plan future (error retry).
+  final VoidCallback onRetry;
+  final TileProvider? tileProvider;
 
   @override
   State<_RouteTab> createState() => _RouteTabState();
 }
 
 class _RouteTabState extends State<_RouteTab> {
-  /// Hoisted route future: creating it in [build] would resubscribe the
-  /// [FutureBuilder] on every parent rebuild (e.g. a location ping
-  /// refreshing the header). It is replaced only for a new truck, an
-  /// explicit parent reload signal, or retry.
-  late Future<PlannedRoute?> _routeFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _routeFuture = _loadRoute();
-  }
-
-  @override
-  void didUpdateWidget(covariant _RouteTab oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.truck.id != oldWidget.truck.id ||
-        widget.extraReload != oldWidget.extraReload) {
-      _routeFuture = _loadRoute();
-    }
-  }
-
-  /// The truck's assigned plan. Null (no plan yet) is a valid outcome, so
-  /// the builder below handles states manually instead of [AsyncView],
-  /// which treats null data as missing.
-  Future<PlannedRoute?> _loadRoute() =>
-      context.read<AuthProvider>().trucks.getPlannedRoute(widget.truck.id);
-
   RouteMapView _routeMap(BuildContext context, PlannedRoute route) {
     final scheme = Theme.of(context).colorScheme;
     return RouteMapView(
@@ -444,7 +499,7 @@ class _RouteTabState extends State<_RouteTab> {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder(
-      future: _routeFuture,
+      future: widget.routeFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const LoadingView();
@@ -453,7 +508,7 @@ class _RouteTabState extends State<_RouteTab> {
           final error = snapshot.error;
           return ErrorView(
             message: error is ApiException ? error.message : error.toString(),
-            onRetry: () => setState(() => _routeFuture = _loadRoute()),
+            onRetry: widget.onRetry,
           );
         }
         final route = snapshot.data;

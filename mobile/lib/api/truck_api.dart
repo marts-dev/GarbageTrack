@@ -30,13 +30,18 @@ class TruckApi {
     double maxMeters = 10000,
     int limit = 50,
   }) async {
-    final query = <String, String>{'max_meters': '$maxMeters', 'limit': '$limit'};
+    final query = <String, String>{
+      'max_meters': '$maxMeters',
+      'limit': '$limit'
+    };
     if (longitude != null && latitude != null) {
       query['longitude'] = '$longitude';
       query['latitude'] = '$latitude';
     }
     final body = await _client.get('/trucks/enroute', query: query);
-    return (body as List).map((e) => Truck.fromJson(e as Map<String, dynamic>)).toList();
+    return (body as List)
+        .map((e) => Truck.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<Truck> getTruck(String truckId) async {
@@ -64,7 +69,10 @@ class TruckApi {
     int limit = 20,
     List<String>? types,
   }) async {
-    final query = <String, String>{'max_meters': '$maxMeters', 'limit': '$limit'};
+    final query = <String, String>{
+      'max_meters': '$maxMeters',
+      'limit': '$limit'
+    };
     if (longitude != null && latitude != null) {
       query['longitude'] = '$longitude';
       query['latitude'] = '$latitude';
@@ -112,7 +120,8 @@ class TruckApi {
     double radiusMeters = 30,
     List<String>? types,
   }) async {
-    final body = await _client.postJson('/trucks/$truckId/collect-vicinity', body: {
+    final body =
+        await _client.postJson('/trucks/$truckId/collect-vicinity', body: {
       if (longitude != null) 'longitude': longitude,
       if (latitude != null) 'latitude': latitude,
       'radius_meters': radiusMeters,
@@ -125,6 +134,13 @@ class TruckApi {
   /// assignment. 404 when the truck has no active route.
   Future<Truck> finishRoute(String truckId) async {
     final body = await _client.postJson('/trucks/$truckId/finish-route');
+    return Truck.fromJson(body as Map<String, dynamic>);
+  }
+
+  /// Starts the truck's run: assigned routes go in progress. 404 when the
+  /// truck has no assigned route, 403 when a collector does not operate it.
+  Future<Truck> startRoute(String truckId) async {
+    final body = await _client.postJson('/trucks/$truckId/start-route');
     return Truck.fromJson(body as Map<String, dynamic>);
   }
 
@@ -150,7 +166,9 @@ class TruckApi {
     final query = <String, String>{'limit': '$limit'};
     if (availability != null) query['availability'] = availability;
     final body = await _client.get('/trucks', query: query);
-    return (body as List).map((e) => Truck.fromJson(e as Map<String, dynamic>)).toList();
+    return (body as List)
+        .map((e) => Truck.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Updates a truck (logistics/admin). Only non-null fields are sent except

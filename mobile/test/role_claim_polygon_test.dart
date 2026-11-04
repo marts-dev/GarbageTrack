@@ -130,6 +130,7 @@ Map<String, dynamic> _plannedTruckRouteJson({
   List<List<double>>? geometry,
   bool emptyStops = false,
   int? totalStops = 3,
+  String planStatus = 'assigned',
 }) =>
     {
       'id': 'r1',
@@ -151,7 +152,7 @@ Map<String, dynamic> _plannedTruckRouteJson({
             'distance_meters': 100.0,
           },
       ],
-      'status': 'assigned',
+      'status': planStatus,
       'scheduled_for': '2026-12-25',
       if (totalStops != null) 'total_stops': totalStops,
       'created_at': '2026-10-29T00:00:00Z',
@@ -715,10 +716,12 @@ void main() {
       bool plannedEmptyStops = false,
       bool noPlannedRoute = false,
       int? planTotalStops = 3,
+      String planStatus = 'assigned',
       Map<String, dynamic>? collectBody,
     }) {
       var routeCalls = 0;
       var shared = false;
+      var started = false;
       return MockClient((request) async {
         final path = request.url.path;
         calls.add('${request.method} $path');
@@ -747,6 +750,7 @@ void main() {
                 emptyStops: plannedEmptyStops ||
                     (plannedEmptiesOnRefetch && routeCalls > 1),
                 totalStops: planTotalStops,
+                planStatus: started ? 'in_progress' : planStatus,
               )),
               200);
         }
@@ -775,6 +779,15 @@ void main() {
               _postJson('p1', 3.38, 6.46, 'Ojota'),
               _postJson('p2', 3.381, 6.461, 'Ikeja'),
             ]),
+            200,
+          );
+        }
+        if (request.method == 'POST' &&
+            path == '/api/v1/trucks/t1/start-route') {
+          started = true;
+          return http.Response(
+            jsonEncode(_truckJson('t1', 'AAA-1',
+                operatorId: operators['t1'], availability: 'working')),
             200,
           );
         }
@@ -818,6 +831,7 @@ void main() {
       bool plannedEmptyStops = false,
       bool noPlannedRoute = false,
       int? planTotalStops = 3,
+      String planStatus = 'assigned',
       Map<String, dynamic>? collectBody,
     }) =>
         AuthProvider.withUser(
@@ -836,6 +850,7 @@ void main() {
               plannedEmptyStops: plannedEmptyStops,
               noPlannedRoute: noPlannedRoute,
               planTotalStops: planTotalStops,
+              planStatus: planStatus,
               collectBody: collectBody,
             ),
           ),
@@ -1390,7 +1405,10 @@ void main() {
 
     testWidgets('finish run posts and frees the truck', (tester) async {
       final calls = <String>[];
-      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, planStatus: 'in_progress'),
+      );
       expect(
         find.text('1 stops · 1 depot(s) · 25 Dec 2026'),
         findsOneWidget,
@@ -1408,7 +1426,10 @@ void main() {
 
     testWidgets('finish run cancel sends nothing', (tester) async {
       final calls = <String>[];
-      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, planStatus: 'in_progress'),
+      );
       await tester.tap(find.text('Finish run'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
@@ -1420,13 +1441,54 @@ void main() {
       final calls = <String>[];
       await pumpDetail(
         tester,
-        detailAuth({'t1': 'u1'}, calls, finishStatus: 403),
+        detailAuth({'t1': 'u1'}, calls,
+            finishStatus: 403, planStatus: 'in_progress'),
       );
       await tester.tap(find.text('Finish run'));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Finish'));
       await tester.pumpAndSettle();
       expect(find.text('truck is not assigned to you'), findsOneWidget);
+    });
+
+    testWidgets('start run posts and flips the button to finish',
+        (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      expect(find.text('Start run'), findsOneWidget);
+      expect(find.text('Finish run'), findsNothing);
+
+      await tester.tap(find.text('Start run'));
+      await tester.pumpAndSettle();
+      expect(find.text('Start run?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Start'));
+      await tester.pumpAndSettle();
+      expect(calls, contains('POST /api/v1/trucks/t1/start-route'));
+      expect(find.text('Run started.'), findsOneWidget);
+      // The refetched plan is in progress, so the slot flips to Finish.
+      expect(find.text('Start run'), findsNothing);
+      expect(find.text('Finish run'), findsOneWidget);
+    });
+
+    testWidgets('start run cancel sends nothing', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      await tester.tap(find.text('Start run'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(calls, isNot(contains('POST /api/v1/trucks/t1/start-route')));
+      expect(find.text('Start run'), findsOneWidget);
+    });
+
+    testWidgets('finish shows when the run status is unknown', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, noPlannedRoute: true),
+      );
+      expect(find.text('Finish run'), findsOneWidget);
+      expect(find.text('Start run'), findsNothing);
     });
 
     testWidgets('finish run hides on an unscheduled truck', (tester) async {
