@@ -7,6 +7,7 @@ import '../state/auth_provider.dart';
 import '../utils/dates.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
+import '../widgets/type_dots.dart';
 import 'classify_screen.dart';
 import 'enroute_screen.dart';
 import 'location_screen.dart';
@@ -91,7 +92,8 @@ class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
       }
     }
   }
@@ -130,17 +132,43 @@ class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
     final user = auth.user;
     final canReport = user?.isResident ?? false;
     final entries = [
-      (Icons.pin_drop_outlined, 'Collection point', 'Where collectors pick up your garbage',
-          const LocationScreen()),
+      (
+        Icons.pin_drop_outlined,
+        'Collection point',
+        'Where collectors pick up your garbage',
+        const LocationScreen()
+      ),
       if (canReport)
-        (Icons.add_a_photo_outlined, 'Report garbage', 'Post waste for collection',
-            const NewPostScreen()),
-      (Icons.list_alt_outlined, 'My reports', 'Track and confirm pickups', const PostsScreen()),
-      (Icons.calendar_month_outlined, 'Pickup calendar', 'See scheduled pickups',
-          const PickupCalendarScreen()),
-      (Icons.local_shipping_outlined, 'Trucks nearby', 'See enroute collections',
-          const EnrouteScreen()),
-      (Icons.psychology_outlined, 'Classify waste', 'Ask the AI helper', const ClassifyScreen()),
+        (
+          Icons.add_a_photo_outlined,
+          'Report garbage',
+          'Post waste for collection',
+          const NewPostScreen()
+        ),
+      (
+        Icons.list_alt_outlined,
+        'My reports',
+        'Track and confirm pickups',
+        const PostsScreen()
+      ),
+      (
+        Icons.calendar_month_outlined,
+        'Pickup calendar',
+        'See scheduled pickups',
+        const PickupCalendarScreen()
+      ),
+      (
+        Icons.local_shipping_outlined,
+        'Trucks nearby',
+        'See enroute collections',
+        const EnrouteScreen()
+      ),
+      (
+        Icons.psychology_outlined,
+        'Classify waste',
+        'Ask the AI helper',
+        const ClassifyScreen()
+      ),
     ];
     return Scaffold(
       appBar: AppBar(
@@ -211,16 +239,19 @@ class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
   }
 }
 
-/// The resident's nearest scheduled pickup: day, route, truck, and run
-/// status. Tapping drills into the pickup calendar. Hidden while loading,
-/// on error, or when signed out; an explicit empty card shows when nothing
+/// The resident's nearest scheduled pickups: day, types, route, truck,
+/// and run status, up to [maxRows] with an overflow footer. Each row
+/// drills into the pickup calendar at its day. Hidden while loading, on
+/// error, or when signed out; an explicit empty card shows when nothing
 /// is scheduled so residents learn where pickups will appear.
 class _NextPickupCard extends StatelessWidget {
   const _NextPickupCard({super.key});
 
-  void _openCalendar(BuildContext context) {
+  static const maxRows = 3;
+
+  void _openCalendar(BuildContext context, [DateTime? day]) {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const PickupCalendarScreen()),
+      MaterialPageRoute(builder: (_) => PickupCalendarScreen(initialDay: day)),
     );
   }
 
@@ -251,32 +282,56 @@ class _NextPickupCard extends StatelessWidget {
             ),
           );
         }
-        // The API sorts by day, but the minimum wins regardless of order.
-        var next = pickups.first;
-        for (final pickup in pickups) {
-          if (pickup.scheduledFor.isBefore(next.scheduledFor)) next = pickup;
-        }
+        // The API sorts by day, but ordering here wins regardless.
+        final ordered = List.of(pickups)
+          ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+        final rows = ordered.take(maxRows).toList();
+        final rest = ordered.length - rows.length;
         final today = todayDay();
-        final overdue = next.scheduledFor.isBefore(today);
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Card(
             margin: EdgeInsets.zero,
-            child: ListTile(
-              leading: const CardIcon(icon: Icons.local_shipping_outlined),
-              title: Text(
-                '${overdue ? 'Pickup overdue' : 'Next pickup'} · '
-                '${relativeDay(next.scheduledFor, today: today)}',
-              ),
-              subtitle: Text(
-                '${formatDay(next.scheduledFor)} · '
-                '${next.routeName ?? next.routeId} · ${next.plateNumber}',
-              ),
-              trailing: StatusPill(
-                label: pretty(next.routeStatus),
-                status: next.routeStatus,
-              ),
-              onTap: () => _openCalendar(context),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Text(
+                    'Upcoming pickups',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                for (final pickup in rows)
+                  ListTile(
+                    leading: TypeDots(pickup.types),
+                    title: Text(
+                      pickup.scheduledFor.isBefore(today)
+                          ? '${formatDay(pickup.scheduledFor)} · Overdue'
+                          : '${formatDay(pickup.scheduledFor)} · '
+                              '${relativeDay(pickup.scheduledFor, today: today)}',
+                    ),
+                    subtitle: Text(
+                      '${pickup.types.map(pretty).join(', ')} · '
+                      '${pickup.routeName ?? pickup.routeId} · '
+                      '${pickup.plateNumber}',
+                    ),
+                    trailing: StatusPill(
+                      label: pretty(pickup.routeStatus),
+                      status: pickup.routeStatus,
+                    ),
+                    onTap: () => _openCalendar(context, pickup.scheduledFor),
+                  ),
+                if (rest > 0)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => _openCalendar(context),
+                      child: Text('+ $rest more'),
+                    ),
+                  ),
+              ],
             ),
           ),
         );

@@ -50,7 +50,10 @@ Map<String, dynamic> _pickupJson({
       'plate_number': plate,
     };
 
-AuthProvider _pickupsAuth(List<Map<String, dynamic>> pickups) =>
+AuthProvider _pickupsAuth(
+  List<Map<String, dynamic>> pickups, {
+  void Function()? onFetch,
+}) =>
     AuthProvider.withUser(
       _user(),
       client: ApiClient(
@@ -58,6 +61,7 @@ AuthProvider _pickupsAuth(List<Map<String, dynamic>> pickups) =>
         httpClient: MockClient((request) async {
           if (request.method == 'GET' &&
               request.url.path == '/api/v1/garbage/mine/pickups') {
+            onFetch?.call();
             return http.Response(jsonEncode(pickups), 200);
           }
           return http.Response('not found', 404);
@@ -77,8 +81,7 @@ AuthProvider _homeAuth({
         baseUrl: 'http://x',
         httpClient: MockClient((request) async {
           final path = request.url.path;
-          if (request.method == 'GET' &&
-              path == '/api/v1/users/u1/location') {
+          if (request.method == 'GET' && path == '/api/v1/users/u1/location') {
             return http.Response(
               jsonEncode({
                 'user_id': 'u1',
@@ -149,6 +152,13 @@ void main() {
       expect(formatMonthYear(day), 'December 2026');
       expect(sameDay(day, DateTime(2026, 12, 25, 23, 59)), isTrue);
       expect(sameDay(day, DateTime(2026, 12, 26)), isFalse);
+    });
+
+    test('isPastDay compares at day granularity', () {
+      final today = DateTime(2026, 11, 4);
+      expect(isPastDay(DateTime(2026, 11, 3, 23, 59), today: today), isTrue);
+      expect(isPastDay(DateTime(2026, 11, 4), today: today), isFalse);
+      expect(isPastDay(DateTime(2026, 11, 5), today: today), isFalse);
     });
 
     test('relativeDay names nearby days and counts the rest', () {
@@ -235,8 +245,7 @@ void main() {
       _useTallSurface(tester);
       final today = todayDay();
       // A day in this month that is never today.
-      final day =
-          DateTime(today.year, today.month, today.day == 1 ? 3 : 1);
+      final day = DateTime(today.year, today.month, today.day == 1 ? 3 : 1);
       await tester.pumpWidget(_withAuth(
         _pickupsAuth([
           _pickupJson(postId: 'p1', day: day),
@@ -308,6 +317,161 @@ void main() {
       expect(find.byType(StatusPill), findsNothing);
     });
 
+    testWidgets('past days dim but stay tappable', (tester) async {
+      _useTallSurface(tester);
+      final today = todayDay();
+      final scheme = AppTheme.light.colorScheme;
+      await tester.pumpWidget(_withAuth(
+        _pickupsAuth([]),
+        const PickupCalendarScreen(),
+      ));
+      await tester.pumpAndSettle();
+
+      // Day 0 rolls back to the previous month's last day, so this is a
+      // past day even on the 1st — shown after one step back.
+      final past = DateTime(today.year, today.month, today.day - 1);
+      if (today.day == 1) {
+        await tester.tap(find.byTooltip('Previous month'));
+        await tester.pumpAndSettle();
+      }
+      final pastText = tester.widget<Text>(find.text('${past.day}').first);
+      expect(
+        pastText.style?.color,
+        scheme.onSurfaceVariant.withValues(alpha: 0.55),
+      );
+      // Today keeps the full-strength number.
+      if (today.day != 1) {
+        final todayText = tester.widget<Text>(find.text('${today.day}').first);
+        expect(
+          todayText.style?.color,
+          AppTheme.light.textTheme.bodyMedium?.color,
+        );
+      }
+      // Dimmed days still select and list.
+      await tester.tap(find.text('${past.day}').first);
+      await tester.pumpAndSettle();
+      expect(find.text('No pickups on ${formatDay(past)}.'), findsOneWidget);
+    });
+
+    testWidgets('jump-to-today resets month and selection', (tester) async {
+      _useTallSurface(tester);
+      final today = todayDay();
+      await tester.pumpWidget(_withAuth(
+        _pickupsAuth([]),
+        const PickupCalendarScreen(),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Next month'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('15').first);
+      await tester.pumpAndSettle();
+      expect(find.text(formatMonthYear(today)), findsNothing);
+
+      await tester.tap(find.byTooltip('Jump to today'));
+      await tester.pumpAndSettle();
+      expect(find.text(formatMonthYear(today)), findsOneWidget);
+      expect(find.text('No pickups on ${formatDay(today)}.'), findsOneWidget);
+    });
+
+    testWidgets('day cells badge the pickup count', (tester) async {
+      Finder badge(String count) => find.byWidgetPredicate(
+            (w) =>
+                w is Text &&
+                w.data == count &&
+                w.style?.color == Colors.white &&
+                w.style?.fontSize == 10,
+          );
+      _useTallSurface(tester);
+      final today = todayDay();
+      final scheme = AppTheme.light.colorScheme;
+      // Future days in the visible month, stepping over when the month ends.
+      final dayA = DateTime(today.year, today.month, today.day + 1);
+      final rolledOver = dayA.month != today.month;
+      final dayB = DateTime(dayA.year, dayA.month, dayA.day + 1);
+      await tester.pumpWidget(_withAuth(
+        _pickupsAuth([
+          _pickupJson(postId: 'p1', day: dayA),
+          _pickupJson(postId: 'p2', day: dayA),
+          _pickupJson(
+            postId: 'p3',
+            day: dayB,
+            routeStatus: 'in_progress',
+          ),
+        ]),
+        const PickupCalendarScreen(),
+      ));
+      await tester.pumpAndSettle();
+      if (rolledOver) {
+        await tester.tap(find.byTooltip('Next month'));
+        await tester.pumpAndSettle();
+      }
+
+      expect(badge('2'), findsOneWidget);
+      expect(badge('1'), findsOneWidget);
+      // Scheduled-only days badge tertiary; rolling days badge primary.
+      bool pillColor(Color color) => find
+          .byWidgetPredicate(
+            (w) =>
+                w is Container &&
+                w.decoration is BoxDecoration &&
+                (w.decoration! as BoxDecoration).color == color,
+          )
+          .evaluate()
+          .isNotEmpty;
+      expect(pillColor(scheme.tertiary), isTrue);
+      expect(pillColor(scheme.primary), isTrue);
+    });
+
+    testWidgets('pulling the day list refreshes pickups', (tester) async {
+      _useTallSurface(tester);
+      final today = todayDay();
+      var fetches = 0;
+      await tester.pumpWidget(_withAuth(
+        _pickupsAuth(
+          [_pickupJson(postId: 'p1', day: today)],
+          onFetch: () => fetches++,
+        ),
+        const PickupCalendarScreen(),
+      ));
+      await tester.pumpAndSettle();
+      expect(fetches, 1);
+      expect(find.text('Plastic'), findsOneWidget);
+
+      // The arm threshold is 25% of the viewport, so the tall surface
+      // needs a long pull.
+      await tester.timedDrag(
+        find.text('Plastic'),
+        const Offset(0, 800),
+        const Duration(milliseconds: 500),
+      );
+      await tester.pumpAndSettle();
+      expect(fetches, 2);
+      // Same data, no loading flash: the list never unmounts.
+      expect(find.text('Plastic'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('pulling an empty day refreshes too', (tester) async {
+      _useTallSurface(tester);
+      var fetches = 0;
+      await tester.pumpWidget(_withAuth(
+        _pickupsAuth([], onFetch: () => fetches++),
+        const PickupCalendarScreen(),
+      ));
+      await tester.pumpAndSettle();
+      expect(fetches, 1);
+
+      final empty = find.text('No pickups on ${formatDay(todayDay())}.');
+      await tester.timedDrag(
+        empty,
+        const Offset(0, 800),
+        const Duration(milliseconds: 500),
+      );
+      await tester.pumpAndSettle();
+      expect(fetches, 2);
+    });
+
     testWidgets('resident home links to the pickup calendar', (tester) async {
       final auth = AuthProvider.withUser(
         _user(),
@@ -351,30 +515,50 @@ void main() {
   });
 
   group('next pickup card', () {
-    testWidgets('shows the earliest run and drills into the calendar',
+    testWidgets('shows the next three runs and drills into the day',
         (tester) async {
       final today = todayDay();
       final soon = DateTime(today.year, today.month, today.day + 1);
-      final later = DateTime(today.year, today.month, today.day + 3);
+      final mid = DateTime(today.year, today.month, today.day + 3);
+      final far = DateTime(today.year, today.month, today.day + 5);
+      final farther = DateTime(today.year, today.month, today.day + 7);
       await tester.pumpWidget(_withAuth(
         _homeAuth(pickups: [
-          _pickupJson(postId: 'p2', day: later, plate: 'BBB-2'),
+          _pickupJson(postId: 'p4', day: farther, plate: 'DDD-4'),
+          _pickupJson(postId: 'p2', day: mid, plate: 'BBB-2'),
+          _pickupJson(postId: 'p3', day: far, plate: 'CCC-3'),
           _pickupJson(postId: 'p1', day: soon),
         ]),
         const ResidentHomeScreen(),
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('Next pickup · Tomorrow'), findsOneWidget);
+      expect(find.text('Upcoming pickups'), findsOneWidget);
       expect(
-        find.text('${formatDay(soon)} · Morning run · AAA-1'),
+        find.text('${formatDay(soon)} · Tomorrow'),
         findsOneWidget,
       );
-      expect(find.widgetWithText(StatusPill, 'Assigned'), findsOneWidget);
+      expect(
+        find.text('${formatDay(mid)} · In 3 days'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Plastic · Morning run · BBB-2'),
+        findsOneWidget,
+      );
+      expect(find.text('+ 1 more'), findsOneWidget);
+      // Sorted earliest-first regardless of payload order.
+      final soonDy =
+          tester.getCenter(find.text('${formatDay(soon)} · Tomorrow')).dy;
+      final midDy =
+          tester.getCenter(find.text('${formatDay(mid)} · In 3 days')).dy;
+      expect(soonDy, lessThan(midDy));
 
-      await tester.tap(find.text('Next pickup · Tomorrow'));
+      // A row drills into the calendar with its day selected.
+      await tester.tap(find.text('${formatDay(mid)} · In 3 days'));
       await tester.pumpAndSettle();
-      expect(find.text(formatMonthYear(today)), findsOneWidget);
+      expect(find.text(formatMonthYear(mid)), findsOneWidget);
+      expect(find.text('Morning run · BBB-2 · Ojota'), findsOneWidget);
     });
 
     testWidgets('overdue pickups call out the delay', (tester) async {
@@ -388,7 +572,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('Pickup overdue · Yesterday'), findsOneWidget);
+      expect(
+        find.text('${formatDay(late)} · Overdue'),
+        findsOneWidget,
+      );
       expect(find.widgetWithText(StatusPill, 'In Progress'), findsOneWidget);
     });
 
@@ -412,8 +599,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Next pickup'), findsNothing);
-      expect(find.textContaining('Pickup overdue'), findsNothing);
+      expect(find.text('Upcoming pickups'), findsNothing);
       expect(find.text('No upcoming pickups'), findsNothing);
       // The rest of home is unaffected.
       expect(find.text('My reports'), findsOneWidget);

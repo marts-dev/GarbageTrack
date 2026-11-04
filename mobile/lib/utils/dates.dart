@@ -51,8 +51,7 @@ DateTime? tryParseDay(Object? raw) {
 }
 
 /// '2026-12-25' for API bodies.
-String toIsoDay(DateTime day) =>
-    '${day.year.toString().padLeft(4, '0')}-'
+String toIsoDay(DateTime day) => '${day.year.toString().padLeft(4, '0')}-'
     '${day.month.toString().padLeft(2, '0')}-'
     '${day.day.toString().padLeft(2, '0')}';
 
@@ -66,6 +65,14 @@ String formatMonthYear(DateTime month) =>
 
 bool sameDay(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
+
+/// True when [day] is strictly before [today] at day granularity.
+/// [today] is injectable so tests don't depend on the wall clock.
+bool isPastDay(DateTime day, {DateTime? today}) {
+  final base = today ?? todayDay();
+  return DateTime(day.year, day.month, day.day)
+      .isBefore(DateTime(base.year, base.month, base.day));
+}
 
 /// Today's date at local midnight.
 DateTime todayDay() {
