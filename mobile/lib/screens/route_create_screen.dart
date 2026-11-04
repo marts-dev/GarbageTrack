@@ -55,6 +55,36 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
   bool _busy = false;
   int _step = 0;
 
+  /// Short rule statement for the Stops header: what auto will pull in
+  /// and where it centers.
+  String _autoSubtitle() {
+    final truck = _pickedTruck;
+    if (truck == null) return 'Auto · pick a truck first';
+    if (truck.currentLocation == null) {
+      return 'Auto · ${truck.plateNumber} has no position';
+    }
+    return 'Auto · within ${formatDistance(autoGenerateMeters)} of ${truck.plateNumber}';
+  }
+
+  /// Full rule statement for the auto switch: radius, center, and order.
+  String _autoExplanation() {
+    final truck = _pickedTruck;
+    if (truck == null) return 'Pick a truck so auto has a start point';
+    if (truck.currentLocation == null) {
+      return 'Needs ${truck.plateNumber}\u2019s position to center on';
+    }
+    return 'Nearest matching posts within ${formatDistance(autoGenerateMeters)} of ${truck.plateNumber}';
+  }
+
+  /// Auto-generate centers on the truck position; without one the server
+  /// rejects the run, so the banner, the step gate, and [_submit] all say
+  /// so up front instead of failing at assign time.
+  String? get _autoCenterError {
+    final truck = _pickedTruck;
+    if (!_auto || truck == null || truck.currentLocation != null) return null;
+    return '${truck.plateNumber} has no position yet — auto-generate centers on the truck';
+  }
+
   /// Advances one step when the current step is valid. Step headers stay
   /// freely tappable; this gate (and [_submit]) is what enforces order.
   void _continue() {
@@ -63,6 +93,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
       1 => _depots.isEmpty ? 'Pick at least one depot' : null,
       2 when _auto && _selectedTypes.isEmpty =>
         'Pick at least one garbage type',
+      2 when _autoCenterError != null => _autoCenterError,
       2 when !_auto && _picked.isEmpty => 'Pick at least one post',
       _ => null,
     };
@@ -108,6 +139,11 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
     }
     if (_auto && _selectedTypes.isEmpty) {
       showError(context, 'Pick at least one garbage type');
+      return;
+    }
+    final centerError = _autoCenterError;
+    if (centerError != null) {
+      showError(context, centerError);
       return;
     }
     if (!_auto && _picked.isEmpty) {
@@ -328,21 +364,55 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
           ),
           _CreateStep(
             title: 'Stops',
-            subtitle: _auto
-                ? 'Auto · ${_selectedTypes.length} types'
-                : 'Manual · ${_picked.length} posts',
+            subtitle:
+                _auto ? _autoSubtitle() : 'Manual · ${_picked.length} posts',
             content: Column(
               children: [
                 Card(
                   margin: EdgeInsets.zero,
                   child: SwitchListTile(
                     title: const Text('Auto-generate stops'),
-                    subtitle:
-                        const Text('Nearest matching posts, within capacity'),
+                    subtitle: Text(_auto
+                        ? _autoExplanation()
+                        : 'Hand-picked posts only; auto is off'),
                     value: _auto,
                     onChanged: (v) => setState(() => _auto = v),
                   ),
                 ),
+                if (_autoCenterError != null) ...[
+                  const SizedBox(height: 12),
+                  Card(
+                    margin: EdgeInsets.zero,
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.warning_amber_outlined,
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '${_pickedTruck!.plateNumber} has no position yet. '
+                              'Auto-generate centers on the truck — have the collector share its location, or switch auto off and hand-pick.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onErrorContainer,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Card(
                   margin: EdgeInsets.zero,
@@ -393,6 +463,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                             _truckId,
                             _depots.isEmpty ? null : _depots.last,
                           )),
+                          auto: _auto,
                           typeFilter: _selectedTypes,
                           picked: _picked,
                           polygonMode: _polygonMode,
@@ -650,6 +721,15 @@ class _ReviewStep extends StatelessWidget {
   final int pickedCount;
   final List<String> depotIds;
 
+  /// Where auto centers, mirroring the Stops step copy.
+  String _autoCenterSuffix(Truck? truck) {
+    if (truck == null) return '';
+    if (truck.currentLocation == null) {
+      return ' · ${truck.plateNumber} has no position';
+    }
+    return ' · within ${formatDistance(autoGenerateMeters)} of ${truck.plateNumber}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final current = truck;
@@ -673,6 +753,7 @@ class _ReviewStep extends StatelessWidget {
                   ? (selectedTypes.isEmpty
                           ? 'Auto · no types picked'
                           : 'Auto · ${selectedTypes.map(pretty).join(', ')}') +
+                      _autoCenterSuffix(current) +
                       (pickedCount > 0
                           ? ' · $pickedCount picked posts ignored'
                           : '')
@@ -776,6 +857,7 @@ Future<_MapData> _loadMapData(
 class _PostsMap extends StatefulWidget {
   const _PostsMap({
     super.key,
+    required this.auto,
     required this.typeFilter,
     required this.picked,
     required this.polygonMode,
@@ -789,6 +871,9 @@ class _PostsMap extends StatefulWidget {
     this.tileProvider,
   });
 
+  /// Auto mode draws the inclusion zone around the truck; manual picks
+  /// need no zone.
+  final bool auto;
   final Set<String> typeFilter;
   final Set<String> picked;
   final bool polygonMode;
@@ -846,6 +931,9 @@ class _PostsMapState extends State<_PostsMap> {
             tileProvider: widget.tileProvider,
             fallbackCenter: widget.fallbackCenter,
             fallbackZoom: widget.fallbackZoom,
+            coverageCircle: widget.auto && truckStart != null
+                ? (center: truckStart, radiusMeters: autoGenerateMeters)
+                : null,
             markers: [
               for (final post in posts)
                 MapMarkerData(

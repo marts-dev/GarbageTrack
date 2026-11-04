@@ -113,6 +113,7 @@ Map<String, dynamic> _routeJson() => {
 MockClient _routeBackend({
   required List<Map<String, dynamic>> posts,
   Map<String, dynamic>? Function()? onRouteBody,
+  List<double>? truckLocation,
 }) {
   return MockClient((request) async {
     final path = request.url.path;
@@ -125,7 +126,12 @@ MockClient _routeBackend({
             'status': 'scheduled',
             'availability': 'available',
             'garbage_types': ['plastic', 'paper'],
-            'current_location': null,
+            'current_location': truckLocation == null
+                ? null
+                : {
+                    'type': 'Point',
+                    'coordinates': truckLocation,
+                  },
             'load': 0,
             'capacity': 10,
           }
@@ -866,6 +872,7 @@ void main() {
           httpClient: _routeBackend(
             posts: posts,
             onRouteBody: () => submitted,
+            truckLocation: [3.10, 6.10],
           ),
         ),
       );

@@ -1695,6 +1695,7 @@ void main() {
         facilities: [
           facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
         ],
+        truckLocation: [3.10, 6.10],
       ));
       await tester.pumpWidget(
         _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
@@ -1740,7 +1741,10 @@ void main() {
       expect(find.text('ABC-123 (Available)'), findsOneWidget);
       expect(find.text(formatDay(todayDay())), findsOneWidget);
       expect(find.text('North Depot · End'), findsOneWidget);
-      expect(find.text('Auto · Plastic, Paper'), findsOneWidget);
+      expect(
+        find.text('Auto · Plastic, Paper · within 5 km of ABC-123'),
+        findsOneWidget,
+      );
 
       // Back returns to the stops step.
       await _scrollTo(tester, find.text('Back'));
@@ -1758,6 +1762,7 @@ void main() {
         facilities: [
           facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
         ],
+        truckLocation: [3.10, 6.10],
         onRouteBody: () => submitted,
       ));
       await tester.pumpWidget(
@@ -1803,6 +1808,7 @@ void main() {
           facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30),
           facilityJson('f2', 'East Recycler', 'recycling', 3.65, 6.85),
         ],
+        truckLocation: [3.10, 6.10],
         onRouteBody: () => submitted,
       ));
       await tester.pumpWidget(
@@ -1926,9 +1932,176 @@ void main() {
       await tester.pumpAndSettle();
       await goToStep(tester, 'Review');
       expect(
-        find.text('Auto · Plastic, Paper · 1 picked posts ignored'),
+        find.text(
+          'Auto · Plastic, Paper · ABC-123 has no position · 1 picked posts ignored',
+        ),
         findsOneWidget,
       );
+    });
+
+    testWidgets('auto mode draws the inclusion zone on the stops map',
+        (tester) async {
+      CircleMarker circle() => tester
+          .widgetList<CircleLayer>(find.byType(CircleLayer))
+          .single
+          .circles
+          .single;
+      final auth = routeAuth(routeBackend(
+        posts: [
+          _postJson('p1', 3.37, 6.45, 'Ojota'),
+          _postJson('p2', 3.60, 6.80, 'Ikeja'),
+        ],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+        truckLocation: [3.10, 6.10],
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await selectTruck(tester);
+      await goToStep(tester, 'Stops');
+      await _scrollTo(tester, find.byType(FlutterMap));
+
+      expect(find.byType(CircleLayer), findsOneWidget);
+      expect(
+        circle().point,
+        GeoPoint(longitude: 3.10, latitude: 6.10).latLng,
+      );
+      expect(circle().radius, autoGenerateMeters);
+      expect(circle().useRadiusInMeter, isTrue);
+
+      // Manual picks need no zone: flipping auto off hides it.
+      await _scrollTo(
+          tester, find.widgetWithText(SwitchListTile, 'Auto-generate stops'));
+      await tester
+          .tap(find.widgetWithText(SwitchListTile, 'Auto-generate stops'));
+      await tester.pumpAndSettle();
+      expect(find.byType(CircleLayer), findsNothing);
+    });
+
+    testWidgets('stops copy asks for a truck before centering', (tester) async {
+      final auth = routeAuth(routeBackend(
+        posts: [_postJson('p1', 3.37, 6.45, 'Ojota')],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await goToStep(tester, 'Stops');
+      expect(find.text('Auto · pick a truck first'), findsOneWidget);
+      expect(
+        find.text('Pick a truck so auto has a start point'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('stops copy states the auto radius and center', (tester) async {
+      final auth = routeAuth(routeBackend(
+        posts: [_postJson('p1', 3.37, 6.45, 'Ojota')],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+        truckLocation: [3.10, 6.10],
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await selectTruck(tester);
+      await goToStep(tester, 'Stops');
+      expect(
+        find.text('Auto · within 5 km of ABC-123'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Nearest matching posts within 5 km of ABC-123'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('stops copy names the missing truck position', (tester) async {
+      final auth = routeAuth(routeBackend(
+        posts: [_postJson('p1', 3.37, 6.45, 'Ojota')],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await selectTruck(tester);
+      await goToStep(tester, 'Stops');
+      expect(
+        find.text('Auto · ABC-123 has no position'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Needs ABC-123\u2019s position to center on'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('auto without a truck position warns and blocks submit',
+        (tester) async {
+      final submitted = <String, dynamic>{};
+      final auth = routeAuth(routeBackend(
+        posts: [_postJson('p1', 3.37, 6.45, 'Ojota')],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+        onRouteBody: () => submitted,
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await selectTruck(tester);
+      await goToStep(tester, 'Depots');
+      await _scrollTo(tester, find.text('North Depot (Dump Site)'));
+      await tester.tap(find.text('North Depot (Dump Site)'));
+      await tester.pumpAndSettle();
+
+      await goToStep(tester, 'Stops');
+      await _scrollTo(tester, find.textContaining('has no position yet'));
+      expect(
+        find.text(
+          'ABC-123 has no position yet. Auto-generate centers on the truck — have the collector share its location, or switch auto off and hand-pick.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(CircleLayer), findsNothing);
+
+      // The step gate stops Continue with the actionable message.
+      await _scrollTo(tester, find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'ABC-123 has no position yet — auto-generate centers on the truck',
+        ),
+        findsOneWidget,
+      );
+
+      // Submit is guarded the same way: nothing posts.
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      await goToStep(tester, 'Review');
+      await _scrollTo(tester, find.text('Assign route'));
+      await tester.tap(find.text('Assign route'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'ABC-123 has no position yet — auto-generate centers on the truck',
+        ),
+        findsOneWidget,
+      );
+      expect(submitted, isEmpty);
     });
 
     testWidgets('undo and clear edit the drawn area', (tester) async {

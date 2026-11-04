@@ -156,6 +156,7 @@ class GarbageMapView extends StatefulWidget {
     this.overlayMarkers = const [],
     this.polylines = const [],
     this.polygons = const [],
+    this.coverageCircle,
     this.height = 220,
     this.initialZoom = 14,
     this.tileProvider,
@@ -177,6 +178,10 @@ class GarbageMapView extends StatefulWidget {
   /// Filled areas (e.g. the route-create selection polygon). Rings with
   /// fewer than 3 points are skipped.
   final List<List<GeoPoint>> polygons;
+
+  /// Translucent coverage circle (e.g. the auto-generate inclusion zone).
+  /// Null draws nothing.
+  final ({GeoPoint center, double radiusMeters})? coverageCircle;
 
   final double height;
   final double initialZoom;
@@ -357,6 +362,16 @@ class _GarbageMapViewState extends State<GarbageMapView> {
                     ),
                 ],
               ),
+            if (widget.coverageCircle case final circle?)
+              CircleLayer(
+                circles: [
+                  coverageCircleMarker(
+                    center: circle.center,
+                    radiusMeters: circle.radiusMeters,
+                    scheme: scheme,
+                  ),
+                ],
+              ),
             MarkerLayer(
               markers: [
                 for (final cluster in clusters)
@@ -508,6 +523,23 @@ class MapPin extends StatelessWidget {
     );
   }
 }
+
+/// Translucent coverage circle (collect radius, auto-generate zone).
+/// The wash is strong enough to read over street tiles but light enough
+/// to see pins through it; the solid ring marks the exact boundary.
+CircleMarker coverageCircleMarker({
+  required GeoPoint center,
+  required double radiusMeters,
+  required ColorScheme scheme,
+}) =>
+    CircleMarker(
+      point: center.latLng,
+      radius: radiusMeters,
+      useRadiusInMeter: true,
+      color: scheme.primary.withValues(alpha: 0.25),
+      borderColor: scheme.primary,
+      borderStrokeWidth: 3,
+    );
 
 /// Circular numbered badge for one ordered pin (e.g. stop 3 of a run),
 /// styled like [MapPin] so it reads as a pin, not a cluster.

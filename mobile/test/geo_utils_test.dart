@@ -34,6 +34,7 @@ void main() {
       expect(formatDistance(0), '0 m');
       expect(formatDistance(40.4), '40 m');
       expect(formatDistance(1566), '1.6 km');
+      expect(formatDistance(5000), '5 km');
       expect(formatDistance(12400), '12 km');
     });
   });

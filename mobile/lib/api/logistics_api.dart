@@ -81,14 +81,19 @@ class LogisticsApi {
     double maxMeters = 10000,
     int limit = 50,
   }) async {
-    final query = <String, String>{'max_meters': '$maxMeters', 'limit': '$limit'};
+    final query = <String, String>{
+      'max_meters': '$maxMeters',
+      'limit': '$limit'
+    };
     if (kind != null) query['kind'] = kind;
     if (longitude != null && latitude != null) {
       query['longitude'] = '$longitude';
       query['latitude'] = '$latitude';
     }
     final body = await _client.get('/logistics/facilities', query: query);
-    return (body as List).map((e) => Facility.fromJson(e as Map<String, dynamic>)).toList();
+    return (body as List)
+        .map((e) => Facility.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   Future<Facility> updateFacility(
@@ -100,7 +105,8 @@ class LogisticsApi {
     List<String>? acceptedTypes,
     String? address,
   }) async {
-    final body = await _client.patchJson('/logistics/facilities/$facilityId', body: {
+    final body =
+        await _client.patchJson('/logistics/facilities/$facilityId', body: {
       if (name != null) 'name': name,
       if (kind != null) 'kind': kind,
       if (longitude != null && latitude != null)
@@ -123,7 +129,7 @@ class LogisticsApi {
     List<GeoPoint>? collectionPoints,
     double? longitude,
     double? latitude,
-    double maxMeters = 5000,
+    double maxMeters = autoGenerateMeters,
     int limit = 20,
     List<String>? types,
     String? district,
@@ -155,7 +161,8 @@ class LogisticsApi {
     return PlannedRoute.fromJson(body as Map<String, dynamic>);
   }
 
-  Future<List<PlannedRoute>> listRoutes({String? truckId, String? status}) async {
+  Future<List<PlannedRoute>> listRoutes(
+      {String? truckId, String? status}) async {
     final query = <String, String>{};
     if (truckId != null) query['truck_id'] = truckId;
     if (status != null) query['status'] = status;

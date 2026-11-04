@@ -82,6 +82,38 @@ void main() {
       expect(find.byType(RichAttributionWidget), findsOneWidget);
     });
 
+    testWidgets('coverage circle renders in meters when set', (tester) async {
+      final center = GeoPoint(longitude: 19.04, latitude: 47.49);
+      await tester.pumpWidget(
+        _wrap(
+          GarbageMapView(
+            markers: markers,
+            coverageCircle: (center: center, radiusMeters: 5000),
+            tileProvider: _StubTileProvider(),
+          ),
+        ),
+      );
+      await tester.pump();
+      final layers =
+          tester.widgetList<CircleLayer>(find.byType(CircleLayer)).toList();
+      expect(layers, hasLength(1));
+      final circle = layers.single.circles.single;
+      expect(circle.point, center.latLng);
+      expect(circle.radius, 5000);
+      expect(circle.useRadiusInMeter, isTrue);
+
+      await tester.pumpWidget(
+        _wrap(
+          GarbageMapView(
+            markers: markers,
+            tileProvider: _StubTileProvider(),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(CircleLayer), findsNothing);
+    });
+
     testWidgets('short polylines are skipped, long ones drawn', (tester) async {
       await tester.pumpWidget(
         _wrap(

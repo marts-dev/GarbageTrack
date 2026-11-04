@@ -168,13 +168,10 @@ class _LocationMapPickerState extends State<LocationMapPicker> {
                     if (widget.coverageCircle case final circle?)
                       CircleLayer(
                         circles: [
-                          CircleMarker(
-                            point: circle.center.latLng,
-                            radius: circle.radiusMeters,
-                            useRadiusInMeter: true,
-                            color: scheme.primary.withValues(alpha: 0.15),
-                            borderColor: scheme.primary.withValues(alpha: 0.5),
-                            borderStrokeWidth: 2,
+                          coverageCircleMarker(
+                            center: circle.center,
+                            radiusMeters: circle.radiusMeters,
+                            scheme: scheme,
                           ),
                         ],
                       ),

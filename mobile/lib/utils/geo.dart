@@ -18,11 +18,14 @@ extension LatLngGeoPoint on LatLng {
 double metersBetween(GeoPoint a, GeoPoint b) =>
     const Distance()(a.latLng, b.latLng);
 
-/// '40 m' below a kilometer, '1.2 km' above (whole kilometers past 10).
+/// '40 m' below a kilometer, '1.2 km' above ('5 km' when whole, and
+/// whole kilometers past 10).
 String formatDistance(double meters) {
   if (meters < 1000) return '${meters.round()} m';
   final km = meters / 1000;
-  return '${km.toStringAsFixed(km < 10 ? 1 : 0)} km';
+  if (km >= 10) return '${km.toStringAsFixed(0)} km';
+  final one = km.toStringAsFixed(1);
+  return '${one.endsWith('.0') ? one.substring(0, one.length - 2) : one} km';
 }
 
 /// Ray-casting point-in-polygon test (longitude = x, latitude = y).

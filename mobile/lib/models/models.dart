@@ -26,6 +26,11 @@ const garbageStatuses = [
 ];
 const routeStatuses = ['assigned', 'in_progress', 'done', 'cancelled'];
 
+/// Auto-generate inclusion radius in meters, centered on the truck.
+/// Mirrors the server's `max_meters` default; the route-create map draws
+/// this zone so logistics sees what auto mode will pull in.
+const autoGenerateMeters = 5000.0;
+
 String pretty(String value) => value
     .split('_')
     .map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}')
