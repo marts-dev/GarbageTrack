@@ -10,6 +10,7 @@ import 'package:garbagetrack/screens/post_detail_screen.dart';
 import 'package:garbagetrack/screens/resident_home_screen.dart';
 import 'package:garbagetrack/state/auth_provider.dart';
 import 'package:garbagetrack/theme/app_theme.dart';
+import 'package:garbagetrack/utils/dates.dart';
 import 'package:garbagetrack/widgets/cards.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -61,10 +62,9 @@ Map<String, dynamic> _postJson(String id, String status) => {
       'image_content_type': null,
       'status': status,
       'created_at': '2026-11-01T00:00:00Z',
-      'collected_at':
-          status == 'pending_confirmation' || status == 'collected'
-              ? '2026-11-02T00:00:00Z'
-              : null,
+      'collected_at': status == 'pending_confirmation' || status == 'collected'
+          ? '2026-11-02T00:00:00Z'
+          : null,
     };
 
 Map<String, dynamic> _assignmentJson({String? routeName = 'Morning run'}) => {
@@ -167,8 +167,7 @@ void main() {
     });
 
     test('CollectionAssignment tolerates a null route name', () {
-      final a =
-          CollectionAssignment.fromJson(_assignmentJson(routeName: null));
+      final a = CollectionAssignment.fromJson(_assignmentJson(routeName: null));
       expect(a.routeName, isNull);
     });
 
@@ -218,9 +217,9 @@ void main() {
       final api = GarbageApi(ApiClient(
         baseUrl: 'http://x',
         httpClient: MockClient((_) async => http.Response(
-          jsonEncode({'detail': 'no collection assignment for this post'}),
-          404,
-        )),
+              jsonEncode({'detail': 'no collection assignment for this post'}),
+              404,
+            )),
       ));
       expect(await api.getCollection('p1'), isNull);
     });
@@ -314,8 +313,7 @@ void main() {
     });
 
     for (final status in ['posted', 'scheduled']) {
-      testWidgets('$status shows no confirm or dispute button',
-          (tester) async {
+      testWidgets('$status shows no confirm or dispute button', (tester) async {
         _useTallSurface(tester);
         final calls = <String>[];
         await tester.pumpWidget(_withAuth(
@@ -326,7 +324,10 @@ void main() {
           ),
         ));
         await tester.pumpAndSettle();
-        expect(find.text(pretty(status)), findsOneWidget);
+        expect(
+          find.widgetWithText(StatusPill, pretty(status)),
+          findsOneWidget,
+        );
         expect(find.text('Confirm collected'), findsNothing);
         expect(find.text('Dispute collection'), findsNothing);
         expect(
@@ -353,8 +354,13 @@ void main() {
     });
   });
 
-  group('post detail collection assignment', () {
-    testWidgets('shows truck and route rows when assigned', (tester) async {
+  group('post detail pickup timeline', () {
+    // Fixture timestamps are UTC midnights; expectations convert to local
+    // the same way the timeline does so any timezone passes.
+    String localDay(String iso) => formatDay(DateTime.parse(iso).toLocal());
+
+    testWidgets('timeline shows the full journey when assigned',
+        (tester) async {
       _useTallSurface(tester);
       final calls = <String>[];
       await tester.pumpWidget(_withAuth(
@@ -370,13 +376,28 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(calls, contains('GET /api/v1/garbage/p1/collection'));
-      expect(find.text('Truck'), findsOneWidget);
-      expect(find.text('AAA-1'), findsOneWidget);
-      expect(find.text('Route'), findsOneWidget);
-      expect(find.text('Morning run · In Progress'), findsOneWidget);
+      expect(find.text('Pickup progress'), findsOneWidget);
+      for (final step in ['Reported', 'Scheduled', 'Picked up', 'Confirmed']) {
+        expect(find.text(step), findsOneWidget);
+      }
+      expect(
+        find.text(localDay('2026-11-01T00:00:00Z')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Morning run · Truck AAA-1'),
+        findsOneWidget,
+      );
+      expect(
+        find.text(localDay('2026-11-02T00:00:00Z')),
+        findsOneWidget,
+      );
+      expect(find.text('Was it really collected?'), findsOneWidget);
+      expect(find.text('Confirm collected'), findsOneWidget);
+      expect(find.text('Dispute collection'), findsOneWidget);
     });
 
-    testWidgets('route row shows the pickup day when scheduled',
+    testWidgets('scheduled step shows the pickup day and rolling run',
         (tester) async {
       _useTallSurface(tester);
       final calls = <String>[];
@@ -396,9 +417,12 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(
-        find.text('Morning run · In Progress · 25 Dec 2026'),
+        find.text('25 Dec 2026 · Morning run · Truck AAA-1'),
         findsOneWidget,
       );
+      // The run started but this post isn't swept: pickup is underway.
+      expect(find.text('Collection underway'), findsOneWidget);
+      expect(find.text('Confirm collected'), findsNothing);
     });
 
     testWidgets('falls back to the route id when the name is null',
@@ -417,10 +441,14 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
-      expect(find.text('r1 · In Progress'), findsOneWidget);
+      expect(find.text('r1 · Truck AAA-1'), findsOneWidget);
+      // Collected is final: no actions.
+      expect(find.text('Confirm collected'), findsNothing);
+      expect(find.text('Dispute collection'), findsNothing);
     });
 
-    testWidgets('hides truck and route rows on 404', (tester) async {
+    testWidgets('timeline without assignment shows plain steps',
+        (tester) async {
       _useTallSurface(tester);
       final calls = <String>[];
       await tester.pumpWidget(_withAuth(
@@ -432,8 +460,9 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(calls, contains('GET /api/v1/garbage/p1/collection'));
-      expect(find.text('Truck'), findsNothing);
-      expect(find.text('Route'), findsNothing);
+      expect(find.text('Pickup progress'), findsOneWidget);
+      expect(find.text('Not on a run yet'), findsOneWidget);
+      expect(find.text('Morning run'), findsNothing);
       // The post itself still renders.
       expect(find.text('Posted'), findsOneWidget);
     });
