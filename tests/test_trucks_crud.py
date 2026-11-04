@@ -68,20 +68,23 @@ def test_list_trucks_roles(client, dispatcher, collector, make_user):
     assert client.get("/api/v1/trucks").status_code == 401
 
 
-def test_list_trucks_filters(client, dispatcher):
-    _make_truck(client, dispatcher["headers"], plate_number="CRUD-E")
-    _make_truck(
-        client,
-        dispatcher["headers"],
-        plate_number="CRUD-S",
-        status="scheduled",
-        availability="working",
+def test_list_trucks_filters(client, dispatcher, make_user):
+    resident = make_user()
+    idle = _make_truck(client, dispatcher["headers"], plate_number="CRUD-E")
+    busy = _make_truck(client, dispatcher["headers"], plate_number="CRUD-S")
+    depot = _make_facility(client, dispatcher["headers"])
+    post = _make_post(client, resident)
+    assigned = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": busy["id"],
+            "post_ids": [post["id"]],
+            "depot_ids": [depot["id"]],
+        },
+        headers=dispatcher["headers"],
     )
-
-    by_status = client.get(
-        "/api/v1/trucks", params={"status": "scheduled"}, headers=dispatcher["headers"]
-    )
-    assert [t["plate_number"] for t in by_status.json()] == ["CRUD-S"]
+    assert assigned.status_code == 201, assigned.text
+    assert idle["availability"] == "available"
 
     by_availability = client.get(
         "/api/v1/trucks", params={"availability": "working"}, headers=dispatcher["headers"]
@@ -101,7 +104,6 @@ def test_patch_truck_fields(client, dispatcher, collector, make_user):
             "plate_number": "CRUD-X",
             "capacity": 4,
             "garbage_types": ["organic"],
-            "status": "done",
             "operator_id": collector["id"],
         },
         headers=dispatcher["headers"],
@@ -111,7 +113,6 @@ def test_patch_truck_fields(client, dispatcher, collector, make_user):
     assert body["plate_number"] == "CRUD-X"
     assert body["capacity"] == 4
     assert body["garbage_types"] == ["organic"]
-    assert body["status"] == "done"
     assert body["operator_id"] == collector["id"]
 
     admin_edit = client.patch(
@@ -129,7 +130,6 @@ def test_patch_truck_validation_422(client, dispatcher):
         {"plate_number": ""},
         {"capacity": 0},
         {"garbage_types": []},
-        {"status": "flying"},
     ):
         response = client.patch(
             f"/api/v1/trucks/{truck['id']}", json=payload, headers=dispatcher["headers"]

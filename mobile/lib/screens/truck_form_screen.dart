@@ -28,7 +28,6 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _plate;
   late final TextEditingController _capacity;
-  late String _status;
   final _types = <String>{};
   String? _operatorId;
   GeoPoint? _location;
@@ -43,8 +42,6 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
     _capacity = TextEditingController(
       text: existing?.capacity == null ? '' : '${existing!.capacity}',
     );
-    _status = existing?.status ?? truckStatuses.first;
-    if (!_statusIsKnown(_status)) _status = truckStatuses.first;
     if (existing != null) {
       _types.addAll(existing.garbageTypes);
       _operatorId = existing.operatorId;
@@ -57,8 +54,6 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
         _collectors =
             context.read<AuthProvider>().auth.listUsers(role: 'collector');
       });
-
-  bool _statusIsKnown(String status) => truckStatuses.contains(status);
 
   @override
   void dispose() {
@@ -91,7 +86,6 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
         final created = await api.createSchedule(
           plateNumber: _plate.text.trim(),
           garbageTypes: _types.toList(),
-          status: _status,
           capacity: capacity,
           longitude: _location?.longitude,
           latitude: _location?.latitude,
@@ -111,7 +105,6 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
           plateNumber: _plate.text.trim(),
           capacity: capacity,
           garbageTypes: _types.toList(),
-          status: _status,
           operatorId: _operatorId,
           // Always send so clearing the picker unassigns (explicit null).
           operatorIdSet: true,
@@ -166,19 +159,13 @@ class _TruckFormScreenState extends State<TruckFormScreen> {
                         labelText: 'Capacity (optional)',
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: _status,
-                      decoration: const InputDecoration(labelText: 'Status'),
-                      items: [
-                        for (final status in truckStatuses)
-                          DropdownMenuItem(
-                            value: status,
-                            child: Text(pretty(status)),
-                          ),
-                      ],
-                      onChanged: (v) => v == null ? null : setState(() => _status = v),
-                    ),
+                    if (!editing) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'New trucks start available; assigning a route puts them to work.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                   ],
                 ),
               ),

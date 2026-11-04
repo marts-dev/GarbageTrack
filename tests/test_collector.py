@@ -46,6 +46,29 @@ def _make_post(client, user, **overrides):
     return response.json()
 
 
+def _make_facility(client, headers):
+    payload = {
+        "name": "North Depot",
+        "kind": "dump_site",
+        "location": {"longitude": 3.38, "latitude": 6.46},
+        "accepted_types": ["plastic"],
+        "address": "1 Depot Rd",
+    }
+    response = client.post("/api/v1/logistics/facilities", json=payload, headers=headers)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def _make_route(client, headers, truck_id, depot_id, post_ids):
+    response = client.post(
+        "/api/v1/logistics/routes",
+        json={"truck_id": truck_id, "post_ids": post_ids, "depot_ids": [depot_id]},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 def test_read_truck_and_404(client, dispatcher, collector):
     truck = _make_truck(client, dispatcher["headers"])
     response = client.get(f"/api/v1/trucks/{truck['id']}", headers=collector["headers"])
@@ -129,7 +152,7 @@ def test_route_empty_when_truck_full(client, dispatcher, collector, make_user):
     collect = client.post(
         f"/api/v1/trucks/{truck['id']}/collect-vicinity", json={}, headers=collector["headers"]
     )
-    assert collect.json()["availability"] == "full"
+    assert collect.json()["load"] == 1
 
     response = client.get(f"/api/v1/trucks/{truck['id']}/route", headers=collector["headers"])
     assert response.status_code == 200
@@ -242,48 +265,63 @@ def test_collect_vicinity_needs_location_and_truck(client, dispatcher, collector
     )
 
 
-def test_update_availability_keeps_load_until_depot_receipt(
+def test_finish_route_closes_run_and_frees_truck(
     client, dispatcher, collector, make_user
 ):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"], capacity=5)
-    _make_post(client, resident)
+    collected_post = _make_post(client, resident)
+    skipped_post = _make_post(client, resident, types=["organic"])
     _assign(client, truck["id"], collector["id"], dispatcher["headers"])
-    client.post(
-        f"/api/v1/trucks/{truck['id']}/collect-vicinity", json={}, headers=collector["headers"]
+    depot = _make_facility(client, dispatcher["headers"])
+    route = _make_route(
+        client,
+        dispatcher["headers"],
+        truck["id"],
+        depot["id"],
+        [collected_post["id"], skipped_post["id"]],
     )
+    assert route["status"] == "assigned"
+    reread = client.get(
+        f"/api/v1/trucks/{truck['id']}", headers=collector["headers"]
+    )
+    assert reread.json()["availability"] == "working"
 
-    working = client.patch(
-        f"/api/v1/trucks/{truck['id']}/availability",
-        json={"availability": "working"},
+    # The fake DB ignores distance, so narrow the run to plastic explicitly.
+    collected = client.post(
+        f"/api/v1/trucks/{truck['id']}/collect-vicinity",
+        json={"types": ["plastic"]},
         headers=collector["headers"],
     )
-    assert working.status_code == 200
-    assert working.json()["availability"] == "working"
-    assert working.json()["load"] == 1
-
-    # Flagging available no longer empties the truck: only a depot receipt does.
-    available = client.patch(
-        f"/api/v1/trucks/{truck['id']}/availability",
-        json={"availability": "available"},
-        headers=collector["headers"],
+    assert collected.json()["collected_count"] == 1
+    started = client.get(
+        f"/api/v1/logistics/routes/{route['id']}", headers=dispatcher["headers"]
     )
-    assert available.json()["availability"] == "available"
-    assert available.json()["load"] == 1
+    assert started.json()["status"] == "in_progress"
 
-    bad = client.patch(
-        f"/api/v1/trucks/{truck['id']}/availability",
-        json={"availability": "napping"},
-        headers=collector["headers"],
+    finished = client.post(
+        f"/api/v1/trucks/{truck['id']}/finish-route", headers=collector["headers"]
     )
-    assert bad.status_code == 422
+    assert finished.status_code == 200, finished.text
+    assert finished.json()["availability"] == "available"
 
-    missing = client.patch(
-        "/api/v1/trucks/000000000000000000000000/availability",
-        json={"availability": "full"},
-        headers=collector["headers"],
+    done = client.get(
+        f"/api/v1/logistics/routes/{route['id']}", headers=dispatcher["headers"]
     )
-    assert missing.status_code == 404
+    assert done.json()["status"] == "done"
+    skipped = client.get(
+        f"/api/v1/garbage/{skipped_post['id']}", headers=resident["headers"]
+    )
+    assert skipped.json()["status"] == "posted"
+    pending = client.get(
+        f"/api/v1/garbage/{collected_post['id']}", headers=resident["headers"]
+    )
+    assert pending.json()["status"] == "pending_confirmation"
+
+    again = client.post(
+        f"/api/v1/trucks/{truck['id']}/finish-route", headers=collector["headers"]
+    )
+    assert again.status_code == 404
 
 
 def test_collector_routes_require_collector_role(client, dispatcher, make_user):
@@ -300,9 +338,8 @@ def test_collector_routes_require_collector_role(client, dispatcher, make_user):
         == 403
     )
     assert (
-        client.patch(
-            f"/api/v1/trucks/{truck['id']}/availability",
-            json={"availability": "working"},
+        client.post(
+            f"/api/v1/trucks/{truck['id']}/finish-route",
             headers=resident["headers"],
         ).status_code
         == 403
@@ -310,7 +347,7 @@ def test_collector_routes_require_collector_role(client, dispatcher, make_user):
     assert client.get(f"/api/v1/trucks/{truck['id']}/route").status_code == 401
 
 
-@pytest.mark.parametrize("route", ["route", "collect-vicinity", "availability"])
+@pytest.mark.parametrize("route", ["route", "collect-vicinity", "finish-route"])
 def test_collector_routes_reject_unknown_truck(client, collector, route):
     if route == "route":
         response = client.get(
@@ -323,9 +360,8 @@ def test_collector_routes_reject_unknown_truck(client, collector, route):
             headers=collector["headers"],
         )
     else:
-        response = client.patch(
-            "/api/v1/trucks/000000000000000000000000/availability",
-            json={"availability": "full"},
+        response = client.post(
+            "/api/v1/trucks/000000000000000000000000/finish-route",
             headers=collector["headers"],
         )
     assert response.status_code == 404

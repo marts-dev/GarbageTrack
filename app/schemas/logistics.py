@@ -1,6 +1,6 @@
 """Logistics request/response schemas."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -8,7 +8,7 @@ from app.models.facility import FacilityKind
 from app.models.garbage import GarbageType
 from app.models.geo import GeoLineString, GeoPoint
 from app.models.route import PlannedRouteStatus
-from app.models.truck import TruckAvailability, TruckStatus
+from app.models.truck import TruckAvailability
 
 
 class FacilityLocation(BaseModel):
@@ -46,7 +46,6 @@ class FacilityResponse(BaseModel):
 class TruckLocationResponse(BaseModel):
     truck_id: str
     plate_number: str
-    status: TruckStatus
     availability: TruckAvailability
     current_location: GeoPoint | None
     load: int
@@ -80,6 +79,8 @@ class PlannedRouteCreate(BaseModel):
     collection_points: list[FacilityLocation] | None = Field(default=None, max_length=100)
     district: str | None = None
     country: str | None = None
+    # Calendar day of the run; omitted means today so every route is visible.
+    scheduled_for: date | None = None
 
 
 class PlannedStopResponse(BaseModel):
@@ -96,6 +97,7 @@ class PlannedRouteResponse(BaseModel):
     origin: GeoPoint
     stops: list[PlannedStopResponse]
     status: PlannedRouteStatus
+    scheduled_for: date
     created_at: datetime
     depot_ids: list[str] = Field(default_factory=list)
     collection_points: list[GeoPoint] = Field(default_factory=list)

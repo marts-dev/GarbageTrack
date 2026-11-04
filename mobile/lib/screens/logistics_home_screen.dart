@@ -363,7 +363,7 @@ class _TrucksTabState extends State<_TrucksTab> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              '${pretty(truck.status)} · ${pretty(truck.availability)}'
+                              '${pretty(truck.availability)}'
                               ' · ${truck.loadSummary}\n'
                               '${truck.isAssigned ? 'Operator assigned' : 'No operator'} · Takes:',
                             ),

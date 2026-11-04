@@ -1,4 +1,5 @@
 // API data models. Enums are kept as validated strings to match the API.
+import '../utils/dates.dart';
 
 const garbageTypes = [
   'plastic',
@@ -16,8 +17,7 @@ const userRoles = ['resident', 'collector', 'logistics', 'depot', 'admin'];
 
 const facilityKinds = ['dump_site', 'recycling', 'waste_center'];
 
-const truckStatuses = ['scheduled', 'enroute', 'done'];
-const truckAvailabilities = ['available', 'working', 'full'];
+const truckAvailabilities = ['available', 'working'];
 const garbageStatuses = ['posted', 'scheduled', 'pending_confirmation', 'collected'];
 const routeStatuses = ['assigned', 'in_progress', 'done', 'cancelled'];
 
@@ -191,7 +191,6 @@ class GarbagePost {
 class Truck {
   final String id;
   final String plateNumber;
-  final String status;
   final String availability;
   final List<String> garbageTypes;
   final GeoPoint? currentLocation;
@@ -211,7 +210,6 @@ class Truck {
   Truck({
     required this.id,
     required this.plateNumber,
-    required this.status,
     required this.availability,
     required this.garbageTypes,
     required this.load,
@@ -225,7 +223,6 @@ class Truck {
   factory Truck.fromJson(Map<String, dynamic> json) => Truck(
         id: json['id'] as String,
         plateNumber: json['plate_number'] as String,
-        status: json['status'] as String,
         availability: json['availability'] as String? ?? 'available',
         garbageTypes:
             (json['garbage_types'] as List).map((e) => e as String).toList(),
@@ -419,6 +416,10 @@ class PlannedRoute {
   /// How [geometry] was built: 'road' or 'straight'.
   final String geometrySource;
 
+  /// Calendar day of the run. Null only on legacy payloads predating
+  /// scheduled dates; the API always sends one now.
+  final DateTime? scheduledFor;
+
   PlannedRoute({
     required this.id,
     required this.truckId,
@@ -431,6 +432,7 @@ class PlannedRoute {
     this.collectionPoints = const [],
     this.geometry,
     this.geometrySource = 'straight',
+    this.scheduledFor,
   });
 
   factory PlannedRoute.fromJson(Map<String, dynamic> json) => PlannedRoute(
@@ -456,6 +458,7 @@ class PlannedRoute {
             const [],
         geometry: lineStringFromJson(json['geometry']),
         geometrySource: json['geometry_source'] as String? ?? 'straight',
+        scheduledFor: tryParseDay(json['scheduled_for']),
       );
 
   /// Points to draw: road geometry when usable, else origin + stops.
@@ -516,28 +519,67 @@ class RegionSummary {
 class CollectionAssignment {
   final String truckId;
   final String plateNumber;
-  final String truckStatus;
   final String routeId;
   final String? routeName;
   final String routeStatus;
+  final DateTime? scheduledFor;
 
   CollectionAssignment({
     required this.truckId,
     required this.plateNumber,
-    required this.truckStatus,
     required this.routeId,
     required this.routeStatus,
     this.routeName,
+    this.scheduledFor,
   });
 
   factory CollectionAssignment.fromJson(Map<String, dynamic> json) =>
       CollectionAssignment(
         truckId: json['truck_id'] as String,
         plateNumber: json['plate_number'] as String,
-        truckStatus: json['truck_status'] as String,
         routeId: json['route_id'] as String,
         routeStatus: json['route_status'] as String,
         routeName: json['route_name'] as String?,
+        scheduledFor: tryParseDay(json['scheduled_for']),
+      );
+}
+
+/// One of the caller's posts on an active route: the resident calendar entry.
+class ScheduledPickup {
+  final String postId;
+  final List<String> types;
+  final String status;
+  final String? district;
+  final String routeId;
+  final String? routeName;
+  final String routeStatus;
+  final DateTime scheduledFor;
+  final String plateNumber;
+
+  ScheduledPickup({
+    required this.postId,
+    required this.types,
+    required this.status,
+    required this.routeId,
+    required this.routeStatus,
+    required this.scheduledFor,
+    required this.plateNumber,
+    this.district,
+    this.routeName,
+  });
+
+  factory ScheduledPickup.fromJson(Map<String, dynamic> json) =>
+      ScheduledPickup(
+        postId: json['post_id'] as String,
+        types:
+            (json['types'] as List).map((e) => e as String).toList(),
+        status: json['status'] as String,
+        district: json['district'] as String?,
+        routeId: json['route_id'] as String,
+        routeName: json['route_name'] as String?,
+        routeStatus: json['route_status'] as String,
+        scheduledFor: tryParseDay(json['scheduled_for'])!,
+        plateNumber: json['plate_number'] as String,
       );
 }
 

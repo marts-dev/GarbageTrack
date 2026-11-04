@@ -7,7 +7,7 @@ from app.models.auth import Role
 from app.models.facility import FacilityKind
 from app.models.garbage import GarbageStatus, GarbageType
 from app.models.route import PlannedRouteStatus
-from app.models.truck import TruckAvailability, TruckStatus
+from app.models.truck import TruckAvailability
 from app.schemas.auth import UserResponse
 from app.schemas.garbage import GarbagePostResponse
 from app.schemas.logistics import (
@@ -29,6 +29,8 @@ from app.services.logistics import (
     PostsAlreadyCollectedError,
     PostsIncompatibleWithTruckError,
     PostsNotFoundError,
+    TruckHasActiveRouteError,
+    TruckNotEmptyError,
 )
 from app.services.trucks import TruckLocationUnknownError, TruckNotFoundError
 
@@ -75,11 +77,10 @@ async def garbage_summary(
 async def list_truck_locations(
     user: Dispatcher,
     db: Db,
-    status: TruckStatus | None = None,
     availability: TruckAvailability | None = None,
 ):
     _ = user
-    return await logistics_service.truck_locations(db, status, availability)
+    return await logistics_service.truck_locations(db, availability)
 
 
 @router.post("/facilities", response_model=FacilityResponse, status_code=status.HTTP_201_CREATED)
@@ -146,6 +147,16 @@ async def create_planned_route(payload: PlannedRouteCreate, user: Dispatcher, db
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
     except PostsIncompatibleWithTruckError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except TruckHasActiveRouteError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="truck already has an active route",
+        ) from None
+    except TruckNotEmptyError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="truck still carries a load; unload at a depot first",
+        ) from None
     except NoCollectablePostsError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
     except TruckLocationUnknownError as exc:

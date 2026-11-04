@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.models.garbage import GarbageStatus, GarbageType
 from app.models.geo import GeoLineString, GeoPoint
-from app.models.truck import TruckAvailability, TruckStatus
+from app.models.truck import TruckAvailability
 from app.schemas.logistics import FacilityResponse, PlannedRouteResponse
 
 
@@ -18,8 +18,6 @@ class TruckLocation(BaseModel):
 class TruckScheduleCreate(BaseModel):
     plate_number: str = Field(min_length=1)
     garbage_types: list[GarbageType] = Field(min_length=1)
-    status: TruckStatus = TruckStatus.SCHEDULED
-    availability: TruckAvailability = TruckAvailability.AVAILABLE
     current_location: TruckLocation | None = None
     eta_minutes: int | None = Field(default=None, ge=0)
     capacity: int | None = Field(default=None, ge=1)
@@ -28,7 +26,6 @@ class TruckScheduleCreate(BaseModel):
 class TruckResponse(BaseModel):
     id: str
     plate_number: str
-    status: TruckStatus
     availability: TruckAvailability
     garbage_types: list[GarbageType]
     current_location: GeoPoint | None
@@ -44,13 +41,8 @@ class TruckUpdate(BaseModel):
     plate_number: str | None = Field(default=None, min_length=1)
     capacity: int | None = Field(default=None, ge=1)
     garbage_types: list[GarbageType] | None = Field(default=None, min_length=1)
-    status: TruckStatus | None = None
     operator_id: str | None = None
     current_location: TruckLocation | None = None
-
-
-class AvailabilityUpdate(BaseModel):
-    availability: TruckAvailability
 
 
 class RouteStop(BaseModel):

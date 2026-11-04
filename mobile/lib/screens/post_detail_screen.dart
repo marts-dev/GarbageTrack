@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/dates.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import '../widgets/type_dots.dart';
@@ -175,13 +176,16 @@ class _CollectionAssignment extends StatelessWidget {
           children: [
             InfoRow(
               label: 'Truck',
-              value:
-                  '${assignment.plateNumber} · ${pretty(assignment.truckStatus)}',
+              value: assignment.plateNumber,
             ),
             InfoRow(
               label: 'Route',
-              value:
-                  '${assignment.routeName ?? assignment.routeId} · ${pretty(assignment.routeStatus)}',
+              value: [
+                assignment.routeName ?? assignment.routeId,
+                pretty(assignment.routeStatus),
+                if (assignment.scheduledFor != null)
+                  formatDay(assignment.scheduledFor!),
+              ].join(' · '),
             ),
           ],
         );

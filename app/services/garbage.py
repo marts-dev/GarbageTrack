@@ -12,11 +12,11 @@ from app.models.common import utcnow
 from app.models.garbage import GarbageStatus
 from app.models.geo import geo_point
 from app.models.route import PlannedRouteStatus
-from app.models.truck import TruckAvailability
 from app.schemas.garbage import (
     CollectionAssignmentResponse,
     GarbagePostCreate,
     GarbagePostResponse,
+    ScheduledPickupResponse,
 )
 
 
@@ -201,15 +201,9 @@ async def _return_load_to_truck(
     for name in types:
         load_by_type[name] = max(0, load_by_type.get(name, 0) - 1)
     new_load = sum(load_by_type.values())
-    update: dict = {"load": new_load, "load_by_type": load_by_type}
-    capacity = truck_doc.get("capacity")
-    if (
-        truck_doc.get("availability") == TruckAvailability.FULL.value
-        and capacity is not None
-        and new_load < capacity
-    ):
-        update["availability"] = TruckAvailability.WORKING.value
-    await db[truck_model.COLLECTION].update_one({"_id": truck_id}, {"$set": update})
+    await db[truck_model.COLLECTION].update_one(
+        {"_id": truck_id}, {"$set": {"load": new_load, "load_by_type": load_by_type}}
+    )
 
 
 async def get_collection_assignment(
@@ -228,20 +222,15 @@ async def get_collection_assignment(
     existing = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
     if existing is None:
         raise GarbagePostNotFoundError(post_id)
-    candidates = []
-    async for doc in db[route_model.COLLECTION].find(
-        {
-            "status": {
-                "$in": [
-                    PlannedRouteStatus.ASSIGNED.value,
-                    PlannedRouteStatus.IN_PROGRESS.value,
-                    PlannedRouteStatus.DONE.value,
-                ]
-            }
-        }
-    ):
-        if any(stop.get("post_id") == object_id for stop in doc.get("stops", [])):
-            candidates.append(doc)
+    candidates = await _routes_containing_post(
+        db,
+        object_id,
+        [
+            PlannedRouteStatus.ASSIGNED.value,
+            PlannedRouteStatus.IN_PROGRESS.value,
+            PlannedRouteStatus.DONE.value,
+        ],
+    )
     if not candidates:
         raise NoCollectionAssignmentError(post_id)
     route_doc = max(candidates, key=lambda d: d.get("created_at"))
@@ -251,8 +240,60 @@ async def get_collection_assignment(
     return CollectionAssignmentResponse(
         truck_id=str(truck_doc["_id"]),
         plate_number=truck_doc["plate_number"],
-        truck_status=truck_doc["status"],
         route_id=str(route_doc["_id"]),
         route_name=route_doc.get("name"),
         route_status=route_doc["status"],
+        scheduled_for=route_model.scheduled_day(route_doc),
     )
+
+
+async def _routes_containing_post(
+    db: AsyncDatabase, post_id: ObjectId, statuses: list[str]
+) -> list[dict]:
+    matches = []
+    async for doc in db[route_model.COLLECTION].find({"status": {"$in": statuses}}):
+        if any(stop.get("post_id") == post_id for stop in doc.get("stops", [])):
+            matches.append(doc)
+    return matches
+
+
+async def list_scheduled_pickups(
+    db: AsyncDatabase, user_id: str
+) -> list[ScheduledPickupResponse]:
+    """The caller's scheduled posts joined to their active route + truck.
+
+    Only assigned/in_progress routes attribute a pickup: done routes belong
+    to history (My reports), cancelled ones to nothing. Orphaned scheduled
+    posts (no active route, no truck) are skipped, and the list is ordered
+    by pickup day so the calendar can group it directly.
+    """
+    active = [
+        PlannedRouteStatus.ASSIGNED.value,
+        PlannedRouteStatus.IN_PROGRESS.value,
+    ]
+    pickups = []
+    async for post in db[garbage_model.COLLECTION].find(
+        {"user_id": user_id, "status": GarbageStatus.SCHEDULED.value}
+    ):
+        routes = await _routes_containing_post(db, post["_id"], active)
+        if not routes:
+            continue
+        route_doc = max(routes, key=lambda d: d.get("created_at"))
+        truck_doc = await db[truck_model.COLLECTION].find_one({"_id": route_doc["truck_id"]})
+        if truck_doc is None:
+            continue
+        pickups.append(
+            ScheduledPickupResponse(
+                post_id=str(post["_id"]),
+                types=post["types"],
+                status=post["status"],
+                district=post.get("district"),
+                route_id=str(route_doc["_id"]),
+                route_name=route_doc.get("name"),
+                route_status=route_doc["status"],
+                scheduled_for=route_model.scheduled_day(route_doc),
+                plate_number=truck_doc["plate_number"],
+            )
+        )
+    pickups.sort(key=lambda p: (p.scheduled_for, p.post_id))
+    return pickups

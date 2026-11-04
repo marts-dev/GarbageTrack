@@ -36,7 +36,7 @@ from app.models.facility import FacilityKind
 from app.models.garbage import GarbageStatus, GarbageType
 from app.models.geo import GeoLineString, GeoPoint
 from app.models.route import PlannedStop
-from app.models.truck import TruckAvailability, TruckStatus
+from app.models.truck import TruckAvailability
 
 PASSWORD = "Password123"
 # 1x1 red PNG, so one post renders with an attached photo.
@@ -186,7 +186,6 @@ async def seed() -> dict:
             truck_model.TruckDocument(
                 id=truck_ids[0],
                 plate_number="NAA 1234",
-                status=TruckStatus.ENROUTE,
                 availability=TruckAvailability.WORKING,
                 garbage_types=[GarbageType.PLASTIC, GarbageType.PAPER],
                 current_location=pt(121.0300, 14.6500),
@@ -199,7 +198,6 @@ async def seed() -> dict:
             truck_model.TruckDocument(
                 id=truck_ids[1],
                 plate_number="NBB 5678",
-                status=TruckStatus.ENROUTE,
                 availability=TruckAvailability.AVAILABLE,
                 garbage_types=[GarbageType.ORGANIC],
                 current_location=pt(121.0450, 14.6650),
@@ -210,7 +208,6 @@ async def seed() -> dict:
             truck_model.TruckDocument(
                 id=truck_ids[2],
                 plate_number="NCC 9012",
-                status=TruckStatus.SCHEDULED,
                 availability=TruckAvailability.AVAILABLE,
                 garbage_types=[GarbageType.GLASS, GarbageType.METAL],
                 capacity=6,
@@ -270,6 +267,8 @@ async def seed() -> dict:
                 name="Morning run - Commonwealth",
                 origin=route_origin,
                 stops=route_stops,
+                # Two days out so the resident calendar shows an upcoming run.
+                scheduled_for=(now + timedelta(days=2)).date().isoformat(),
                 # Visit order: Cubao mid-route, Payatas last as the terminus.
                 depot_ids=[facility_ids[1], facility_ids[0]],
                 collection_points=[pt(121.0325, 14.6525), pt(121.0355, 14.6555)],

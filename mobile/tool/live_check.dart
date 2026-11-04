@@ -132,19 +132,15 @@ Future<void> main() async {
   final truck = await trucks.createSchedule(
     plateNumber: 'LIVE-1',
     garbageTypes: const ['plastic'],
-    status: 'enroute',
     longitude: 3.37,
     latitude: 6.45,
     capacity: 5,
   );
   check(truck.plateNumber == 'LIVE-1', 'create truck schedule');
+  check(truck.availability == 'available', 'new truck unscheduled');
   await loginAs('c@example.com', 'Password123');
   final route = await trucks.getRoute(truck.id);
   check(route.stops.length == 1 && route.stops.first.distanceMeters != null, 'collector route');
-  final collect = await trucks.collectVicinity(truck.id, radiusMeters: 1000);
-  check(collect.collectedCount == 1, 'collect vicinity');
-  final working = await trucks.setAvailability(truck.id, 'working');
-  check(working.availability == 'working', 'set availability');
 
   await loginAs('l@example.com', 'Password123');
   final summary = await logistics.garbageSummary();
@@ -191,9 +187,18 @@ Future<void> main() async {
     country: 'Nigeria',
   );
   check(planned.stops.length == 1, 'manual route assignment');
+  check(planned.scheduledFor != null, 'route scheduled day defaults');
   check(planned.depotIds.length == 1, 'route depot roundtrip');
   check(planned.collectionPoints.length == 1, 'route collection-point roundtrip');
   check((await logistics.listRoutes(truckId: truck.id)).length == 1, 'list routes');
+
+  // Assignment requires an empty truck, so the vicinity collect happens
+  // after the route exists; it picks up both nearby posts.
+  await loginAs('c@example.com', 'Password123');
+  final collect = await trucks.collectVicinity(truck.id, radiusMeters: 1000);
+  check(collect.collectedCount == 2, 'collect vicinity');
+  final finished = await trucks.finishRoute(truck.id);
+  check(finished.availability == 'available', 'finish route');
 
   client.close();
   if (_failures > 0) {

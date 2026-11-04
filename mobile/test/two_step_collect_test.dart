@@ -70,7 +70,6 @@ Map<String, dynamic> _postJson(String id, String status) => {
 Map<String, dynamic> _assignmentJson({String? routeName = 'Morning run'}) => {
       'truck_id': 't1',
       'plate_number': 'AAA-1',
-      'truck_status': 'enroute',
       'route_id': 'r1',
       'route_name': routeName,
       'route_status': 'in_progress',
@@ -162,7 +161,6 @@ void main() {
       final a = CollectionAssignment.fromJson(_assignmentJson());
       expect(a.truckId, 't1');
       expect(a.plateNumber, 'AAA-1');
-      expect(a.truckStatus, 'enroute');
       expect(a.routeId, 'r1');
       expect(a.routeName, 'Morning run');
       expect(a.routeStatus, 'in_progress');
@@ -373,9 +371,34 @@ void main() {
       await tester.pumpAndSettle();
       expect(calls, contains('GET /api/v1/garbage/p1/collection'));
       expect(find.text('Truck'), findsOneWidget);
-      expect(find.text('AAA-1 · Enroute'), findsOneWidget);
+      expect(find.text('AAA-1'), findsOneWidget);
       expect(find.text('Route'), findsOneWidget);
       expect(find.text('Morning run · In Progress'), findsOneWidget);
+    });
+
+    testWidgets('route row shows the pickup day when scheduled',
+        (tester) async {
+      _useTallSurface(tester);
+      final calls = <String>[];
+      await tester.pumpWidget(_withAuth(
+        _detailAuth(
+          calls,
+          status: 'scheduled',
+          assignment: {
+            ..._assignmentJson(),
+            'scheduled_for': '2026-12-25',
+          },
+        ),
+        PostDetailScreen(
+          postId: 'p1',
+          tileProvider: _StubTileProvider(),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Morning run · In Progress · 25 Dec 2026'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('falls back to the route id when the name is null',

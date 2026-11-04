@@ -5,11 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.deps import CurrentUser, Db, require_roles
 from app.models.auth import Role
 from app.models.garbage import GarbageType
-from app.models.truck import TruckAvailability, TruckStatus
+from app.models.truck import TruckAvailability
 from app.schemas.auth import UserResponse
 from app.schemas.garbage import GarbagePostResponse
 from app.schemas.trucks import (
-    AvailabilityUpdate,
     CollectionRouteResponse,
     CollectVicinityRequest,
     CollectVicinityResponse,
@@ -22,6 +21,7 @@ from app.schemas.trucks import (
 from app.services import trucks as trucks_service
 from app.services.trucks import (
     EmptyUpdateError,
+    NoActiveRouteError,
     NoPlannedRouteError,
     TruckHasRoutesError,
     TruckLocationUnknownError,
@@ -63,12 +63,11 @@ async def list_enroute(
 async def list_trucks(
     user: Collector,
     db: Db,
-    status: TruckStatus | None = None,
     availability: TruckAvailability | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ):
     _ = user
-    return await trucks_service.list_trucks(db, status, availability, limit)
+    return await trucks_service.list_trucks(db, availability, limit)
 
 
 @router.get("/{truck_id}", response_model=TruckResponse)
@@ -184,14 +183,19 @@ async def collect_vicinity(truck_id: str, payload: CollectVicinityRequest, user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
 
-@router.patch("/{truck_id}/availability", response_model=TruckResponse)
-async def update_availability(truck_id: str, payload: AvailabilityUpdate, user: Collector, db: Db):
+@router.post("/{truck_id}/finish-route", response_model=TruckResponse)
+async def finish_route(truck_id: str, user: Collector, db: Db):
+    """Close the truck's active run: route done, truck free for assignment."""
     try:
-        return await trucks_service.set_availability(db, truck_id, payload.availability, user)
+        return await trucks_service.finish_active_route(db, truck_id, user)
     except TruckNotFoundError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="truck not found") from None
     except TruckNotAssignedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from None
+    except NoActiveRouteError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="truck has no active route"
+        ) from None
 
 
 @router.post("/{truck_id}/location", response_model=TruckResponse)

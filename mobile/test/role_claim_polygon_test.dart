@@ -15,6 +15,7 @@ import 'package:garbagetrack/screens/route_create_screen.dart';
 import 'package:garbagetrack/screens/route_detail_screen.dart';
 import 'package:garbagetrack/screens/truck_detail_screen.dart';
 import 'package:garbagetrack/state/auth_provider.dart';
+import 'package:garbagetrack/utils/dates.dart';
 import 'package:garbagetrack/utils/geo.dart';
 import 'package:garbagetrack/widgets/geo_map.dart';
 import 'package:garbagetrack/widgets/route_preview.dart';
@@ -49,12 +50,12 @@ Map<String, dynamic> _truckJson(
   String plate, {
   String? operatorId,
   List<double>? location,
+  String availability = 'working',
 }) =>
     {
       'id': id,
       'plate_number': plate,
-      'status': 'enroute',
-      'availability': 'working',
+      'availability': availability,
       'garbage_types': ['plastic'],
       'current_location': location == null
           ? null
@@ -149,6 +150,7 @@ Map<String, dynamic> _plannedTruckRouteJson({
           },
       ],
       'status': 'assigned',
+      'scheduled_for': '2026-12-25',
       'created_at': '2026-10-29T00:00:00Z',
       'depot_ids': ['f1'],
       'depots': [
@@ -372,10 +374,8 @@ void main() {
           );
         }),
       ));
-      final trucks =
-          await api.listTrucks(status: 'enroute', availability: 'working');
+      final trucks = await api.listTrucks(availability: 'working');
       expect(seen!.path, '/api/v1/trucks');
-      expect(seen!.queryParameters['status'], 'enroute');
       expect(seen!.queryParameters['availability'], 'working');
       expect(trucks, hasLength(1));
       expect(trucks.single.operatorId, 'u1');
@@ -658,7 +658,7 @@ void main() {
       expect(find.text('BBB-2'), findsNothing);
       expect(find.text('CCC-3'), findsNothing);
       expect(find.text('Assigned to you'), findsOneWidget);
-      for (final tab in ['Route', 'Collect', 'Status']) {
+      for (final tab in ['Route', 'Collect']) {
         expect(find.text(tab), findsOneWidget);
       }
       // No claim UI anywhere.
@@ -674,7 +674,7 @@ void main() {
       expect(find.text('No truck assigned'), findsOneWidget);
       expect(find.text('Ask logistics to assign you a truck.'), findsOneWidget);
       expect(find.text('AAA-1'), findsNothing);
-      for (final tab in ['Route', 'Collect', 'Status']) {
+      for (final tab in ['Route', 'Collect']) {
         expect(find.text(tab), findsNothing);
       }
     });
@@ -704,7 +704,8 @@ void main() {
       Map<String, String?> operators,
       List<String> calls, {
       List<List<double>>? geometry,
-      int availabilityStatus = 200,
+      int finishStatus = 200,
+      String truckAvailability = 'working',
       List<double>? truckLocation,
       List<double>? sharedLocation,
       bool plannedEmptiesOnRefetch = false,
@@ -720,6 +721,7 @@ void main() {
             return http.Response(
             jsonEncode(_truckJson('t1', 'AAA-1',
                 operatorId: operators['t1'],
+                availability: truckAvailability,
                 location:
                     shared ? sharedLocation ?? truckLocation : truckLocation)),
               200,
@@ -752,16 +754,17 @@ void main() {
               200,
             );
           }
-          if (request.method == 'PATCH' &&
-              path == '/api/v1/trucks/t1/availability') {
-            if (availabilityStatus != 200) {
+          if (request.method == 'POST' &&
+              path == '/api/v1/trucks/t1/finish-route') {
+            if (finishStatus != 200) {
               return http.Response(
                 jsonEncode({'detail': 'truck is not assigned to you'}),
-                availabilityStatus,
+                finishStatus,
               );
             }
             return http.Response(
-              jsonEncode(_truckJson('t1', 'AAA-1', operatorId: operators['t1'])),
+              jsonEncode(_truckJson('t1', 'AAA-1',
+                  operatorId: operators['t1'], availability: 'available')),
               200,
             );
           }
@@ -783,7 +786,8 @@ void main() {
       Map<String, String?> operators,
       List<String> calls, {
       List<List<double>>? geometry,
-      int availabilityStatus = 200,
+      int finishStatus = 200,
+      String truckAvailability = 'working',
       List<double>? truckLocation,
       List<double>? sharedLocation,
       bool plannedEmptiesOnRefetch = false,
@@ -798,7 +802,8 @@ void main() {
               operators,
               calls,
               geometry: geometry,
-              availabilityStatus: availabilityStatus,
+              finishStatus: finishStatus,
+              truckAvailability: truckAvailability,
               truckLocation: truckLocation,
               sharedLocation: sharedLocation,
               plannedEmptiesOnRefetch: plannedEmptiesOnRefetch,
@@ -848,14 +853,6 @@ void main() {
         find.widgetWithText(FilledButton, 'Collect vicinity'),
       );
       expect(collect.onPressed, isNull);
-
-      await tester.tap(find.text('Status'));
-      await tester.pumpAndSettle();
-      expect(
-        find.text(
-            'Only the assigned operator can change status on this truck.'),
-        findsOneWidget,
-      );
     });
 
     testWidgets('assigned operator sees the share-location button',
@@ -1066,17 +1063,55 @@ void main() {
       );
     });
 
-    testWidgets('availability 403 surfaces the server detail', (tester) async {
+    testWidgets('finish run posts and frees the truck', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      expect(
+        find.text('1 stops · 1 depot(s) · 25 Dec 2026'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Finish run'));
+      await tester.pumpAndSettle();
+      expect(find.text('Finish run?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish'));
+      await tester.pumpAndSettle();
+      expect(calls, contains('POST /api/v1/trucks/t1/finish-route'));
+      expect(find.text('Run finished. Truck is Available.'), findsOneWidget);
+      // The truck is unscheduled, so the button goes away.
+      expect(find.text('Finish run'), findsNothing);
+    });
+
+    testWidgets('finish run cancel sends nothing', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(tester, detailAuth({'t1': 'u1'}, calls));
+      await tester.tap(find.text('Finish run'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(
+          calls, isNot(contains('POST /api/v1/trucks/t1/finish-route')));
+    });
+
+    testWidgets('finish 403 surfaces the server detail', (tester) async {
       final calls = <String>[];
       await pumpDetail(
         tester,
-        detailAuth({'t1': 'u1'}, calls, availabilityStatus: 403),
+        detailAuth({'t1': 'u1'}, calls, finishStatus: 403),
       );
-      await tester.tap(find.text('Status'));
+      await tester.tap(find.text('Finish run'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Available'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Finish'));
       await tester.pumpAndSettle();
       expect(find.text('truck is not assigned to you'), findsOneWidget);
+    });
+
+    testWidgets('finish run hides on an unscheduled truck', (tester) async {
+      final calls = <String>[];
+      await pumpDetail(
+        tester,
+        detailAuth({'t1': 'u1'}, calls, truckAvailability: 'available'),
+      );
+      expect(find.text('Finish run'), findsNothing);
     });
 
     testWidgets('route map draws road geometry when present', (tester) async {
@@ -1250,7 +1285,7 @@ void main() {
       await _scrollTo(tester, find.byType(DropdownButtonFormField<String>));
       await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('ABC-123 (Scheduled)').last);
+      await tester.tap(find.text('ABC-123 (Available)').last);
       await tester.pumpAndSettle();
     }
 
@@ -1311,6 +1346,50 @@ void main() {
       expect(submitted['truck_id'], 't1');
       expect(submitted['depot_ids'], ['f1']);
       expect(submitted['post_ids'], ['p1']);
+    });
+
+    testWidgets('scheduled day picker lands in the submit body',
+        (tester) async {
+      final submitted = <String, dynamic>{};
+      final auth = routeAuth(routeBackend(
+        posts: [],
+        facilities: [
+          facilityJson('f1', 'North Depot', 'dump_site', 3.20, 6.30)
+        ],
+        onRouteBody: () => submitted,
+      ));
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await selectTruck(tester);
+      await _scrollTo(tester, find.text('North Depot (Dump Site)'));
+      await tester.tap(find.text('North Depot (Dump Site)'));
+      await tester.pumpAndSettle();
+
+      // New routes default to today (scroll back: the depot tap left the
+      // Details card outside the lazily-built viewport).
+      await _scrollTo(tester, find.text('Scheduled day'));
+      expect(find.text('Scheduled day'), findsOneWidget);
+      expect(find.text(formatDay(todayDay())), findsOneWidget);
+
+      // Pick the 15th of next month: always a valid future day.
+      await tester.tap(find.text('Scheduled day'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.chevron_right).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('15'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      final today = todayDay();
+      final expected = DateTime(today.year, today.month + 1, 15);
+      expect(find.text(formatDay(expected)), findsOneWidget);
+
+      await _scrollTo(tester, find.text('Assign route'));
+      await tester.tap(find.text('Assign route'));
+      await tester.pumpAndSettle();
+      expect(submitted['scheduled_for'], toIsoDay(expected));
     });
 
     testWidgets('last-selected depot is the labeled route end',
@@ -1424,6 +1503,7 @@ void main() {
             },
           ],
           'status': 'assigned',
+          'scheduled_for': '2026-12-25',
           'created_at': '2026-10-29T00:00:00Z',
           'depot_ids': ['f1'],
           'collection_points': [],
@@ -1675,8 +1755,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Ada Collector'), findsOneWidget);
-      expect(find.text('AAA-1 · Enroute · Working'), findsOneWidget);
+      expect(find.text('AAA-1 · Working'), findsOneWidget);
       expect(find.text('North Depot (End)'), findsOneWidget);
+      expect(find.text('Scheduled'), findsOneWidget);
+      expect(find.text('25 Dec 2026'), findsOneWidget);
       expect(
         calls.where((c) => c == 'GET /api/v1/auth/users'),
         hasLength(1),

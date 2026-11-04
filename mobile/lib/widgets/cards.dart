@@ -117,7 +117,7 @@ class TruckCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final subtitle = [
-      pretty(truck.status),
+      pretty(truck.availability),
       if (truck.currentLocation != null) truck.currentLocation!.short,
       if (truck.etaMinutes != null) 'ETA ${truck.etaMinutes} min',
       truck.loadSummary,

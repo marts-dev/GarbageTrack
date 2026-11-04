@@ -80,4 +80,13 @@ class GarbageApi {
       rethrow;
     }
   }
+
+  /// The caller's scheduled pickups: own scheduled posts on active routes,
+  /// ordered by pickup day for the resident calendar.
+  Future<List<ScheduledPickup>> getMyPickups() async {
+    final body = await _client.get('/garbage/mine/pickups');
+    return (body as List)
+        .map((e) => ScheduledPickup.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
 }

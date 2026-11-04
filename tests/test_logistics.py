@@ -171,22 +171,33 @@ def test_garbage_summary_scopes_totals_to_country(client, dispatcher, make_user,
     assert ghana_summary.json()["by_type"] == {"metal": 1}
 
 
-def test_truck_locations_and_filters(client, dispatcher):
-    _make_truck(client, dispatcher["headers"], plate_number="A-1", status="enroute")
-    _make_truck(
-        client, dispatcher["headers"], plate_number="B-2", status="scheduled", current_location=None
+def test_truck_locations_and_filters(client, dispatcher, make_user):
+    resident = make_user()
+    _make_truck(client, dispatcher["headers"], plate_number="A-1")
+    busy = _make_truck(client, dispatcher["headers"], plate_number="B-2")
+    depot = _make_facility(client, dispatcher["headers"])
+    post = _make_post(client, resident)
+    assigned = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": busy["id"],
+            "post_ids": [post["id"]],
+            "depot_ids": [depot["id"]],
+        },
+        headers=dispatcher["headers"],
     )
+    assert assigned.status_code == 201, assigned.text
 
     all_trucks = client.get("/api/v1/logistics/trucks/locations", headers=dispatcher["headers"])
     assert all_trucks.status_code == 200
     assert {t["plate_number"] for t in all_trucks.json()} == {"A-1", "B-2"}
 
-    enroute = client.get(
+    working = client.get(
         "/api/v1/logistics/trucks/locations",
-        params={"status": "enroute"},
+        params={"availability": "working"},
         headers=dispatcher["headers"],
     )
-    assert [t["plate_number"] for t in enroute.json()] == ["A-1"]
+    assert [t["plate_number"] for t in working.json()] == ["B-2"]
 
     located = next(t for t in all_trucks.json() if t["plate_number"] == "A-1")
     assert located["current_location"] == {"type": "Point", "coordinates": [3.37, 6.45]}
@@ -327,6 +338,104 @@ def test_create_route_geometry_ends_at_last_depot(client, dispatcher, make_user)
     assert response.status_code == 201, response.text
     coords = response.json()["geometry"]["coordinates"]
     assert coords[-1] == [9.99, 9.99]
+
+
+def test_create_route_rejects_second_active_route(client, dispatcher, make_user):
+    me = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    p1 = _make_post(client, me)
+    p2 = _make_post(client, me)
+
+    def assign(post_id):
+        return client.post(
+            "/api/v1/logistics/routes",
+            json={
+                "truck_id": truck["id"],
+                "post_ids": [post_id],
+                "depot_ids": [depot["id"]],
+            },
+            headers=dispatcher["headers"],
+        )
+
+    assert assign(p1["id"]).status_code == 201
+    reread = client.get(
+        f"/api/v1/trucks/{truck['id']}", headers=dispatcher["headers"]
+    )
+    assert reread.json()["availability"] == "working"
+
+    busy = assign(p2["id"])
+    assert busy.status_code == 409, busy.text
+
+
+def test_create_route_rejects_loaded_truck(client, dispatcher, make_user):
+    me = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    p1 = _make_post(client, me)
+
+    def assign(post_id):
+        return client.post(
+            "/api/v1/logistics/routes",
+            json={
+                "truck_id": truck["id"],
+                "post_ids": [post_id],
+                "depot_ids": [depot["id"]],
+            },
+            headers=dispatcher["headers"],
+        )
+
+    assert assign(p1["id"]).status_code == 201
+    collected = client.post(
+        f"/api/v1/trucks/{truck['id']}/collect-vicinity",
+        json={"types": ["plastic"]},
+        headers=dispatcher["headers"],
+    )
+    assert collected.json()["collected_count"] == 1
+    finished = client.post(
+        f"/api/v1/trucks/{truck['id']}/finish-route", headers=dispatcher["headers"]
+    )
+    assert finished.status_code == 200, finished.text
+
+    # Run closed but the load never reached a depot: not assignable.
+    p2 = _make_post(client, me)
+    loaded = assign(p2["id"])
+    assert loaded.status_code == 400, loaded.text
+
+    disputed = client.patch(
+        f"/api/v1/garbage/{p1['id']}/dispute-collected", headers=me["headers"]
+    )
+    assert disputed.status_code == 200, disputed.text
+    assert assign(p2["id"]).status_code == 201
+
+
+def test_delete_route_releases_truck(client, dispatcher, make_user):
+    me = make_user()
+    truck = _make_truck(client, dispatcher["headers"])
+    depot = _make_facility(client, dispatcher["headers"])
+    post = _make_post(client, me)
+    created = client.post(
+        "/api/v1/logistics/routes",
+        json={
+            "truck_id": truck["id"],
+            "post_ids": [post["id"]],
+            "depot_ids": [depot["id"]],
+        },
+        headers=dispatcher["headers"],
+    )
+    assert created.status_code == 201, created.text
+
+    deleted = client.delete(
+        f"/api/v1/logistics/routes/{created.json()['id']}",
+        headers=dispatcher["headers"],
+    )
+    assert deleted.status_code == 204, deleted.text
+    reread = client.get(
+        f"/api/v1/trucks/{truck['id']}", headers=dispatcher["headers"]
+    )
+    assert reread.json()["availability"] == "available"
+    reverted = client.get(f"/api/v1/garbage/{post['id']}", headers=me["headers"])
+    assert reverted.json()["status"] == "posted"
 
 
 def test_create_route_auto_uses_truck_route(client, dispatcher, make_user):

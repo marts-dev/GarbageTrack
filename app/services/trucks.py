@@ -13,7 +13,7 @@ from app.models.common import utcnow
 from app.models.garbage import GarbageStatus
 from app.models.geo import GeoLineString, GeoPoint, geo_point
 from app.models.route import PlannedRouteStatus
-from app.models.truck import TruckAvailability, TruckStatus
+from app.models.truck import TruckAvailability
 from app.schemas.garbage import GarbagePostResponse
 from app.schemas.logistics import FacilityResponse, PlannedStopResponse
 from app.schemas.trucks import (
@@ -66,6 +66,10 @@ class NoPlannedRouteError(Exception):
     pass
 
 
+class NoActiveRouteError(Exception):
+    pass
+
+
 class EmptyUpdateError(Exception):
     pass
 
@@ -74,7 +78,6 @@ def _to_response(doc: dict) -> TruckResponse:
     return TruckResponse(
         id=str(doc["_id"]),
         plate_number=doc["plate_number"],
-        status=doc["status"],
         availability=doc.get("availability", TruckAvailability.AVAILABLE.value),
         garbage_types=doc["garbage_types"],
         current_location=doc.get("current_location"),
@@ -117,8 +120,7 @@ async def create_schedule(db: AsyncDatabase, payload: TruckScheduleCreate) -> Tr
     )
     doc = truck_model.TruckDocument(
         plate_number=payload.plate_number,
-        status=payload.status,
-        availability=payload.availability,
+        availability=TruckAvailability.AVAILABLE,
         garbage_types=payload.garbage_types,
         current_location=location,
         eta_minutes=payload.eta_minutes,
@@ -141,7 +143,20 @@ async def list_enroute(
     max_meters: float = 10000,
     limit: int = 50,
 ) -> list[TruckResponse]:
-    query: dict = {"status": TruckStatus.ENROUTE.value}
+    """Trucks on live runs: ones with an in-progress route.
+
+    Run state lives on the route now; this joins it back to trucks so the
+    live map keeps working without a truck status flag.
+    """
+    active_ids = {
+        doc["truck_id"]
+        async for doc in db[route_model.COLLECTION].find(
+            {"status": PlannedRouteStatus.IN_PROGRESS.value}
+        )
+    }
+    if not active_ids:
+        return []
+    query: dict = {"_id": {"$in": list(active_ids)}}
     if longitude is not None and latitude is not None:
         query["current_location"] = {
             "$near": {
@@ -189,13 +204,10 @@ def _require_operator_binding(truck_doc: dict, user: object | None) -> None:
 
 async def list_trucks(
     db: AsyncDatabase,
-    status: TruckStatus | None = None,
     availability: TruckAvailability | None = None,
     limit: int = 50,
 ) -> list[TruckResponse]:
     query: dict = {}
-    if status is not None:
-        query["status"] = status.value
     if availability is not None:
         query["availability"] = availability.value
     cursor = db[truck_model.COLLECTION].find(query).limit(limit)
@@ -389,6 +401,7 @@ async def get_truck_planned_route(db: AsyncDatabase, truck_id: str) -> TruckPlan
         origin=doc["origin"],
         stops=stops,
         status=doc["status"],
+        scheduled_for=route_model.scheduled_day(doc),
         created_at=doc["created_at"],
         depot_ids=[str(depot_id) for depot_id in depot_ids],
         depots=[
@@ -514,12 +527,19 @@ async def collect_vicinity(
     load = sum(load_by_type.values())
     capacity = truck_doc.get("capacity")
     availability = truck_doc.get("availability", TruckAvailability.AVAILABLE.value)
-    if capacity is not None and load >= capacity:
-        availability = TruckAvailability.FULL.value
     await db[truck_model.COLLECTION].update_one(
         {"_id": truck_doc["_id"]},
-        {"$set": {"load": load, "load_by_type": load_by_type, "availability": availability}},
+        {"$set": {"load": load, "load_by_type": load_by_type}},
     )
+    if post_ids:
+        # First pickup starts the run: the assigned route goes in progress.
+        await db[route_model.COLLECTION].update_many(
+            {
+                "truck_id": truck_doc["_id"],
+                "status": PlannedRouteStatus.ASSIGNED.value,
+            },
+            {"$set": {"status": PlannedRouteStatus.IN_PROGRESS.value}},
+        )
     return CollectVicinityResponse(
         truck_id=truck_id,
         collected_count=len(post_ids),
@@ -547,16 +567,65 @@ async def update_truck_location(
     return _to_response(truck_doc)
 
 
-async def set_availability(
-    db: AsyncDatabase,
-    truck_id: str,
-    availability: TruckAvailability,
-    user: object | None = None,
+async def finish_active_route(
+    db: AsyncDatabase, truck_id: str, user: object | None = None
 ) -> TruckResponse:
-    """Flag availability only: the load clears solely on depot receipt."""
+    """Close the truck's active run: route done, truck free for assignment.
+
+    Unfinished scheduled stops revert to posted for the next run; collected
+    and pending posts are untouched. Availability and load are left alone:
+    receiving already manages them, and a still-loaded truck simply is not
+    assignable until a depot takes the load.
+    """
     truck_doc = await _get_truck_doc(db, truck_id)
     _require_operator_binding(truck_doc, user)
-    update: dict = {"availability": availability.value}
-    await db[truck_model.COLLECTION].update_one({"_id": truck_doc["_id"]}, {"$set": update})
-    truck_doc.update(update)
+    active = [
+        doc
+        async for doc in db[route_model.COLLECTION].find(
+            {
+                "truck_id": truck_doc["_id"],
+                "status": {
+                    "$in": [
+                        PlannedRouteStatus.ASSIGNED.value,
+                        PlannedRouteStatus.IN_PROGRESS.value,
+                    ]
+                },
+            }
+        )
+    ]
+    if not active:
+        raise NoActiveRouteError(truck_id)
+    route_doc = max(active, key=lambda d: d.get("created_at"))
+    await db[route_model.COLLECTION].update_one(
+        {"_id": route_doc["_id"]},
+        {"$set": {"status": PlannedRouteStatus.DONE.value}},
+    )
+    stop_ids = [
+        stop["post_id"] for stop in route_doc.get("stops", []) if stop.get("post_id")
+    ]
+    if stop_ids:
+        await db[garbage_model.COLLECTION].update_many(
+            {"_id": {"$in": stop_ids}, "status": GarbageStatus.SCHEDULED.value},
+            {"$set": {"status": GarbageStatus.POSTED.value}},
+        )
+    remaining = [
+        doc
+        async for doc in db[route_model.COLLECTION].find(
+            {
+                "truck_id": truck_doc["_id"],
+                "status": {
+                    "$in": [
+                        PlannedRouteStatus.ASSIGNED.value,
+                        PlannedRouteStatus.IN_PROGRESS.value,
+                    ]
+                },
+            }
+        )
+    ]
+    if not remaining:
+        await db[truck_model.COLLECTION].update_one(
+            {"_id": truck_doc["_id"]},
+            {"$set": {"availability": TruckAvailability.AVAILABLE.value}},
+        )
+        truck_doc["availability"] = TruckAvailability.AVAILABLE.value
     return _to_response(truck_doc)

@@ -8,8 +8,6 @@ class TruckApi {
   Future<Truck> createSchedule({
     required String plateNumber,
     required List<String> garbageTypes,
-    String status = 'scheduled',
-    String availability = 'available',
     double? longitude,
     double? latitude,
     int? etaMinutes,
@@ -18,8 +16,6 @@ class TruckApi {
     final body = await _client.postJson('/trucks/schedules', body: {
       'plate_number': plateNumber,
       'garbage_types': garbageTypes,
-      'status': status,
-      'availability': availability,
       if (longitude != null && latitude != null)
         'current_location': {'longitude': longitude, 'latitude': latitude},
       if (etaMinutes != null) 'eta_minutes': etaMinutes,
@@ -125,9 +121,10 @@ class TruckApi {
     return CollectResult.fromJson(body as Map<String, dynamic>);
   }
 
-  Future<Truck> setAvailability(String truckId, String availability) async {
-    final body = await _client
-        .patchJson('/trucks/$truckId/availability', body: {'availability': availability});
+  /// Closes the truck's active run: route done, truck free for
+  /// assignment. 404 when the truck has no active route.
+  Future<Truck> finishRoute(String truckId) async {
+    final body = await _client.postJson('/trucks/$truckId/finish-route');
     return Truck.fromJson(body as Map<String, dynamic>);
   }
 
@@ -147,12 +144,10 @@ class TruckApi {
 
   /// Lists trucks for operations roles (collector, logistics, admin).
   Future<List<Truck>> listTrucks({
-    String? status,
     String? availability,
     int limit = 50,
   }) async {
     final query = <String, String>{'limit': '$limit'};
-    if (status != null) query['status'] = status;
     if (availability != null) query['availability'] = availability;
     final body = await _client.get('/trucks', query: query);
     return (body as List).map((e) => Truck.fromJson(e as Map<String, dynamic>)).toList();
@@ -167,7 +162,6 @@ class TruckApi {
     String? plateNumber,
     int? capacity,
     List<String>? garbageTypes,
-    String? status,
     String? operatorId,
     bool operatorIdSet = false,
     double? longitude,
@@ -177,7 +171,6 @@ class TruckApi {
       if (plateNumber != null) 'plate_number': plateNumber,
       if (capacity != null) 'capacity': capacity,
       if (garbageTypes != null) 'garbage_types': garbageTypes,
-      if (status != null) 'status': status,
       if (operatorIdSet) 'operator_id': operatorId,
       if (longitude != null && latitude != null)
         'current_location': {'longitude': longitude, 'latitude': latitude},

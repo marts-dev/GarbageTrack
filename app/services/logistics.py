@@ -14,7 +14,7 @@ from app.models.facility import FacilityKind
 from app.models.garbage import GarbageStatus, GarbageType
 from app.models.geo import GeoLineString, GeoPoint, geo_point
 from app.models.route import PlannedRouteStatus, PlannedStop
-from app.models.truck import TruckAvailability, TruckStatus
+from app.models.truck import TruckAvailability
 from app.schemas.garbage import GarbagePostResponse
 from app.schemas.logistics import (
     FacilityCreate,
@@ -70,6 +70,14 @@ class DepotsNotFoundError(Exception):
     def __init__(self, missing: list[str]):
         super().__init__(f"depots not found: {missing}")
         self.missing = missing
+
+
+class TruckHasActiveRouteError(Exception):
+    pass
+
+
+class TruckNotEmptyError(Exception):
+    pass
 
 
 def _to_object_id(value: str, error: type[Exception]):
@@ -136,12 +144,9 @@ def _posts_in_country(posts: list[dict], country: str) -> list[dict]:
 
 async def truck_locations(
     db: AsyncDatabase,
-    status: TruckStatus | None = None,
     availability: TruckAvailability | None = None,
 ) -> list[TruckLocationResponse]:
     query: dict = {}
-    if status is not None:
-        query["status"] = status.value
     if availability is not None:
         query["availability"] = availability.value
     locations = []
@@ -150,7 +155,6 @@ async def truck_locations(
             TruckLocationResponse(
                 truck_id=str(doc["_id"]),
                 plate_number=doc["plate_number"],
-                status=doc["status"],
                 availability=doc.get("availability", TruckAvailability.AVAILABLE.value),
                 current_location=doc.get("current_location"),
                 load=doc.get("load", 0),
@@ -265,6 +269,7 @@ def _to_route_response(doc: dict) -> PlannedRouteResponse:
             for stop in doc["stops"]
         ],
         status=doc["status"],
+        scheduled_for=route_model.scheduled_day(doc),
         created_at=doc["created_at"],
         depot_ids=[str(depot_id) for depot_id in doc.get("depot_ids", [])],
         collection_points=doc.get("collection_points", []),
@@ -310,6 +315,28 @@ async def _resolve_depots(db: AsyncDatabase, depot_ids: list[str]) -> list[Objec
     return object_ids
 
 
+async def _require_assignable(db: AsyncDatabase, truck_doc: dict) -> None:
+    """A truck takes a route only when free of runs and unloaded."""
+    active = [
+        doc
+        async for doc in db[route_model.COLLECTION].find(
+            {
+                "truck_id": truck_doc["_id"],
+                "status": {
+                    "$in": [
+                        PlannedRouteStatus.ASSIGNED.value,
+                        PlannedRouteStatus.IN_PROGRESS.value,
+                    ]
+                },
+            }
+        )
+    ]
+    if active:
+        raise TruckHasActiveRouteError(str(truck_doc["_id"]))
+    if int(truck_doc.get("load", 0)) > 0:
+        raise TruckNotEmptyError(str(truck_doc["_id"]))
+
+
 async def _mark_posts_scheduled(db: AsyncDatabase, post_ids: list[ObjectId]) -> None:
     if post_ids:
         await db[garbage_model.COLLECTION].update_many(
@@ -326,6 +353,7 @@ async def create_planned_route(db: AsyncDatabase, payload: PlannedRouteCreate) -
     truck_doc = await db[truck_model.COLLECTION].find_one({"_id": truck_id})
     if truck_doc is None:
         raise trucks_service.TruckNotFoundError(payload.truck_id)
+    await _require_assignable(db, truck_doc)
     depot_object_ids = await _resolve_depots(db, payload.depot_ids)
 
     origin: GeoPoint
@@ -409,12 +437,17 @@ async def create_planned_route(db: AsyncDatabase, payload: PlannedRouteCreate) -
         stops=stops,
         depot_ids=depot_object_ids,
         collection_points=collection_points,
+        scheduled_for=(payload.scheduled_for or utcnow().date()).isoformat(),
         geometry=geometry,
         geometry_source=geometry_source,
     )
     stored = doc.model_dump(by_alias=True, exclude={"id"})
     result = await db[route_model.COLLECTION].insert_one(stored)
     stored["_id"] = result.inserted_id
+    await db[truck_model.COLLECTION].update_one(
+        {"_id": truck_id},
+        {"$set": {"availability": TruckAvailability.WORKING.value}},
+    )
     return _to_route_response(stored)
 
 
@@ -441,6 +474,31 @@ async def get_planned_route(db: AsyncDatabase, route_id: str) -> PlannedRouteRes
     return _to_route_response(stored)
 
 
+async def _release_truck_if_idle(db: AsyncDatabase, truck_id: object | None) -> None:
+    """Return a truck to available when it holds no more active routes."""
+    if truck_id is None:
+        return
+    remaining = [
+        doc
+        async for doc in db[route_model.COLLECTION].find(
+            {
+                "truck_id": truck_id,
+                "status": {
+                    "$in": [
+                        PlannedRouteStatus.ASSIGNED.value,
+                        PlannedRouteStatus.IN_PROGRESS.value,
+                    ]
+                },
+            }
+        )
+    ]
+    if not remaining:
+        await db[truck_model.COLLECTION].update_one(
+            {"_id": truck_id},
+            {"$set": {"availability": TruckAvailability.AVAILABLE.value}},
+        )
+
+
 async def delete_planned_route(db: AsyncDatabase, route_id: str) -> None:
     try:
         object_id = ObjectId(route_id)
@@ -450,6 +508,7 @@ async def delete_planned_route(db: AsyncDatabase, route_id: str) -> None:
     if stored is None:
         raise PlannedRouteNotFoundError(route_id)
     await db[route_model.COLLECTION].delete_one({"_id": object_id})
+    await _release_truck_if_idle(db, stored.get("truck_id"))
     stop_ids = [stop["post_id"] for stop in stored.get("stops", []) if stop.get("post_id")]
     if stop_ids:
         await db[garbage_model.COLLECTION].update_many(

@@ -1,4 +1,5 @@
 import '../models/models.dart';
+import '../utils/dates.dart';
 import 'api_client.dart';
 
 class LogisticsApi {
@@ -33,9 +34,8 @@ class LogisticsApi {
     return GarbageSummary.fromJson(body as Map<String, dynamic>);
   }
 
-  Future<List<Truck>> truckLocations({String? status, String? availability}) async {
+  Future<List<Truck>> truckLocations({String? availability}) async {
     final query = <String, String>{};
-    if (status != null) query['status'] = status;
     if (availability != null) query['availability'] = availability;
     // TruckLocationResponse shares the fields Truck needs except id/plate naming.
     final body = await _client.get('/logistics/trucks/locations', query: query);
@@ -44,7 +44,6 @@ class LogisticsApi {
       return Truck(
         id: m['truck_id'] as String,
         plateNumber: m['plate_number'] as String,
-        status: m['status'] as String,
         availability: m['availability'] as String? ?? 'available',
         garbageTypes: const [],
         load: (m['load'] as num?)?.toInt() ?? 0,
@@ -129,12 +128,14 @@ class LogisticsApi {
     List<String>? types,
     String? district,
     String? country,
+    DateTime? scheduledFor,
   }) async {
     final body = await _client.postJson('/logistics/routes', body: {
       'truck_id': truckId,
       'depot_ids': depotIds,
       if (name != null && name.isNotEmpty) 'name': name,
       if (postIds != null) 'post_ids': postIds,
+      if (scheduledFor != null) 'scheduled_for': toIsoDay(scheduledFor),
       // Flat {longitude, latitude} shape; the API returns GeoJSON.
       if (collectionPoints != null && collectionPoints.isNotEmpty)
         'collection_points': [

@@ -314,10 +314,10 @@ def test_collection_assignment_returns_truck_and_route(
         assert body == {
             "truck_id": truck["id"],
             "plate_number": truck["plate_number"],
-            "truck_status": truck["status"],
             "route_id": route["id"],
             "route_name": route["name"],
             "route_status": route["status"],
+            "scheduled_for": route["scheduled_for"],
         }
 
 
@@ -331,6 +331,11 @@ def test_collection_assignment_prefers_most_recent_route(
     first = _make_route(
         client, dispatcher["headers"], truck["id"], depot["id"], [post["id"]], name="Old run"
     )
+    # One active route per truck: close the first before planning the next.
+    finished = client.post(
+        f"/api/v1/trucks/{truck['id']}/finish-route", headers=dispatcher["headers"]
+    )
+    assert finished.status_code == 200, finished.text
     second = _make_route(
         client, dispatcher["headers"], truck["id"], depot["id"], [post["id"]], name="New run"
     )

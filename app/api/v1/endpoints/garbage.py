@@ -9,6 +9,7 @@ from app.schemas.garbage import (
     CollectionAssignmentResponse,
     GarbagePostCreate,
     GarbagePostResponse,
+    ScheduledPickupResponse,
 )
 from app.services import garbage as garbage_service
 from app.services.garbage import (
@@ -57,6 +58,11 @@ async def search_posts(
     return await garbage_service.list_posts(
         db, user_id, status, longitude, latitude, max_meters, limit, district, country
     )
+
+
+@router.get("/mine/pickups", response_model=list[ScheduledPickupResponse])
+async def read_my_pickups(user: CurrentUser, db: Db):
+    return await garbage_service.list_scheduled_pickups(db, user.id)
 
 
 @router.get("/{post_id}", response_model=GarbagePostResponse)

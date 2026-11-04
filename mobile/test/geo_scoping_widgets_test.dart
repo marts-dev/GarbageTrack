@@ -201,7 +201,7 @@ Future<void> _selectTruck(WidgetTester tester) async {
   await _scrollTo(tester, find.byType(DropdownButtonFormField<String>));
   await tester.tap(find.byType(DropdownButtonFormField<String>));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('ABC-123 (Scheduled)').last);
+  await tester.tap(find.text('ABC-123 (Available)').last);
   await tester.pumpAndSettle();
 }
 
@@ -800,7 +800,7 @@ void main() {
       await tester.pumpAndSettle();
       // The mock truck collects plastic and paper; posts are plastic-only,
       // so the joined type line can only come from the truck dropdown entry.
-      expect(find.text('ABC-123 (Scheduled)'), findsOneWidget);
+      expect(find.text('ABC-123 (Available)'), findsOneWidget);
       expect(find.text('Plastic, Paper'), findsOneWidget);
       expect(find.byType(TypeDot), findsWidgets);
     });
@@ -822,6 +822,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       // Manual mode shows the checkbox list.
+      await _scrollTo(tester, find.byType(SwitchListTile));
       await tester.tap(find.byType(SwitchListTile).first);
       await tester.pumpAndSettle();
       await _scrollTo(tester, find.byType(CheckboxListTile));
@@ -862,10 +863,13 @@ void main() {
       );
       await tester.pumpAndSettle();
       // Without a truck every type is offered.
+      await _scrollTo(tester, find.widgetWithText(FilterChip, 'Organic'));
       expect(find.widgetWithText(FilterChip, 'Organic'), findsOneWidget);
 
       await _selectTruck(tester);
       // The mock truck carries plastic and paper only.
+      await _scrollTo(
+          tester, find.text('Only types ABC-123 can carry.'));
       expect(find.text('Only types ABC-123 can carry.'), findsOneWidget);
       expect(find.widgetWithText(FilterChip, 'Plastic'), findsOneWidget);
       expect(find.widgetWithText(FilterChip, 'Paper'), findsOneWidget);
@@ -900,6 +904,7 @@ void main() {
         _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
+      await _scrollTo(tester, find.byType(FlutterMap));
       expect(find.byType(ClusterBadge), findsOneWidget);
       expect(find.text('2'), findsOneWidget);
     });
@@ -961,6 +966,7 @@ void main() {
         _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
       );
       await tester.pumpAndSettle();
+      await _scrollTo(tester, find.byType(SwitchListTile));
       await tester.tap(find.byType(SwitchListTile).first);
       await tester.pumpAndSettle();
       await _scrollTo(tester, find.byType(FlutterMap));

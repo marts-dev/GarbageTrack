@@ -7,6 +7,7 @@ import '../api/api_client.dart';
 import '../models/models.dart';
 import '../state/auth_provider.dart';
 import '../utils/country_viewports.dart';
+import '../utils/dates.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import '../widgets/type_dots.dart';
@@ -122,18 +123,38 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
     }
   }
 
-  Future<void> _setAvailability(String value) async {
+  /// Closes the truck's active run. Availability is process-owned now, so
+  /// this is the only way a truck returns to unscheduled from the UI.
+  Future<void> _finishRoute() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Finish run?'),
+        content: const Text(
+            'This closes the active run and frees the truck. Unfinished stops '
+            'return to posted; collected posts are untouched.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Finish'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     setState(() => _busy = true);
     try {
-      final truck = await context
-          .read<AuthProvider>()
-          .trucks
-          .setAvailability(widget.truckId, value);
+      final truck =
+          await context.read<AuthProvider>().trucks.finishRoute(widget.truckId);
       if (mounted) {
-        showOk(context,
-            'Status: ${pretty(truck.availability)} (load ${truck.load})');
-        // The load may have reset, which changes remaining capacity, so
-        // the route refetches while the rest of the tab state is kept.
+        showOk(
+            context, 'Run finished. Truck is ${pretty(truck.availability)}.');
+        // The run is gone, so the route tab refetches (empty state) while
+        // the rest of the tab state is kept.
         setState(() {
           _freshTruck = truck;
           _routeReload++;
@@ -179,7 +200,7 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
         builder: (context, loaded) {
           final truck = _freshTruck ?? loaded;
           return DefaultTabController(
-          length: 3,
+          length: 2,
           child: Column(
             children: [
               Padding(
@@ -206,18 +227,8 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            StatusPill(
-                              label: pretty(truck.status),
-                              status: truck.status,
-                            ),
-                            Chip(
-                              label: Text(truck.loadSummary),
-                            ),
-                          ],
+                        Chip(
+                          label: Text(truck.loadSummary),
                         ),
                         if (truck.currentLocation != null) ...[
                           const SizedBox(height: 8),
@@ -226,13 +237,43 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ],
-                          if (auth.user?.isCollector == true &&
-                              truck.isOperatedBy(auth.user!.id)) ...[
+                          // Header actions share one row so the header keeps its
+                          // height and the tab body below keeps its space.
+                          if ((auth.user?.isCollector == true &&
+                                      truck.isOperatedBy(auth.user!.id)) ||
+                                  (truck.availability == 'working' &&
+                                      (auth.user?.isCollector != true ||
+                                          truck.isOperatedBy(
+                                              auth.user!.id)))) ...[
                             const SizedBox(height: 8),
-                            FilledButton.tonalIcon(
-                              onPressed: _busy ? null : _shareLocation,
-                              icon: const Icon(Icons.my_location_outlined),
-                              label: const Text('Share my location'),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                if (auth.user?.isCollector == true &&
+                                    truck.isOperatedBy(auth.user!.id))
+                                  FilledButton.tonalIcon(
+                                    onPressed:
+                                        _busy ? null : _shareLocation,
+                                    icon: const Icon(
+                                        Icons.my_location_outlined),
+                                    label:
+                                        const Text('Share my location'),
+                                  ),
+                                // A working truck has an active run.
+                                // Collectors see this only on their own
+                                // truck; the API also rejects other
+                                // operators with 403.
+                                if (truck.availability == 'working' &&
+                                    (auth.user?.isCollector != true ||
+                                        truck.isOperatedBy(auth.user!.id)))
+                                  FilledButton.tonalIcon(
+                                    onPressed: _busy ? null : _finishRoute,
+                                    icon:
+                                        const Icon(Icons.flag_outlined),
+                                    label: const Text('Finish run'),
+                                  ),
+                              ],
                             ),
                           ],
                         const SizedBox(height: 4),
@@ -258,7 +299,6 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                 tabs: [
                   Tab(text: 'Route'),
                   Tab(text: 'Collect'),
-                  Tab(text: 'Status'),
                 ],
               ),
               Expanded(
@@ -278,13 +318,6 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                       assignedGuarded: auth.user?.role == 'collector' &&
                           !truck.isOperatedBy(auth.user!.id),
                         onChanged: _refreshAfterCollect,
-                    ),
-                    _StatusTab(
-                      truck: truck,
-                      busy: _busy,
-                      assignedGuarded: auth.user?.role == 'collector' &&
-                          !truck.isOperatedBy(auth.user!.id),
-                      onSelect: _setAvailability,
                     ),
                   ],
                 ),
@@ -321,9 +354,9 @@ class _AssignmentRow extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           mine
-              ? 'Collect and change status from your truck.'
+              ? 'Collect and finish runs from your truck.'
               : truck.isAssigned
-                  ? 'Only the assigned operator can collect or change status on this truck.'
+                  ? 'Only the assigned operator can collect or finish runs on this truck.'
                   : 'Logistics assigns an operator to this truck.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
@@ -528,7 +561,11 @@ class _AssignedRouteHeader extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '${route.stops.length} stops · ${route.depotIds.length} depot(s)',
+          [
+            '${route.stops.length} stops',
+            '${route.depotIds.length} depot(s)',
+            if (route.scheduledFor != null) formatDay(route.scheduledFor!),
+          ].join(' · '),
           style: theme.textTheme.bodySmall,
         ),
       ],
@@ -786,79 +823,4 @@ class _CollectTabState extends State<_CollectTab> {
   }
 }
 
-class _StatusTab extends StatelessWidget {
-  const _StatusTab(
-      {required this.truck,
-      required this.busy,
-      required this.assignedGuarded,
-      required this.onSelect});
 
-  final Truck truck;
-  final bool busy;
-
-  /// True when a collector is not this truck's operator, so status changes
-  /// are disabled. The API also rejects those calls with 403.
-  final bool assignedGuarded;
-  final ValueChanged<String> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (assignedGuarded) ...[
-          Card(
-            margin: EdgeInsets.zero,
-            color: Theme.of(context).colorScheme.secondaryContainer,
-            child: const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                  'Only the assigned operator can change status on this truck.'),
-            ),
-          ),
-          const SizedBox(height: 12),
-        ],
-        Card(
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Returning to Available resets the load to zero.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        RadioGroup<String>(
-          groupValue: truck.availability,
-          onChanged: (v) {
-            if (!busy && !assignedGuarded && v != null) onSelect(v);
-          },
-          child: Column(
-            children: [
-              for (final value in truckAvailabilities)
-                Card(
-                  child: RadioListTile<String>(
-                    title: Text(pretty(value)),
-                    value: value,
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}

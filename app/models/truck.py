@@ -12,21 +12,19 @@ from app.models.geo import GeoPoint
 COLLECTION = "trucks"
 
 
-class TruckStatus(StrEnum):
-    SCHEDULED = "scheduled"
-    ENROUTE = "enroute"
-    DONE = "done"
-
-
 class TruckAvailability(StrEnum):
+    """Assignability mirror: free for a route, or committed to one.
+
+    Process-owned (route assign/close flips it); fullness is derived from
+    load vs capacity wherever displayed, never stored.
+    """
+
     AVAILABLE = "available"
     WORKING = "working"
-    FULL = "full"
 
 
 class TruckDocument(MongoDocument):
     plate_number: str
-    status: TruckStatus = TruckStatus.SCHEDULED
     availability: TruckAvailability = TruckAvailability.AVAILABLE
     garbage_types: list[GarbageType] = Field(min_length=1)
     current_location: GeoPoint | None = None

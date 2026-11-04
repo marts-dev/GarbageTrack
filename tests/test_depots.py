@@ -417,7 +417,7 @@ def test_dispute_after_receipt_floors_load_at_zero(
     assert truck_after.json()["load"] == 0
 
 
-def test_dispute_below_capacity_leaves_full_state(
+def test_dispute_returns_load_without_touching_availability(
     client, dispatcher, make_user
 ):
     resident = make_user()
@@ -430,7 +430,8 @@ def test_dispute_below_capacity_leaves_full_state(
             f"/api/v1/trucks/{truck['id']}", headers=dispatcher["headers"]
         ).json()
 
-    assert truck_state()["availability"] == "full"
+    assert truck_state()["load"] == 1
+    assert truck_state()["availability"] == "available"
     assert (
         client.patch(
             f"/api/v1/garbage/{post['id']}/dispute-collected", headers=resident["headers"]
@@ -438,4 +439,5 @@ def test_dispute_below_capacity_leaves_full_state(
         == 200
     )
     assert truck_state()["load"] == 0
-    assert truck_state()["availability"] == "working"
+    assert truck_state()["load_by_type"] == {"plastic": 0}
+    assert truck_state()["availability"] == "available"

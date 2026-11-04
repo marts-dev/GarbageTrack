@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/models.dart';
 import '../state/auth_provider.dart';
 import '../utils/country_viewports.dart';
+import '../utils/dates.dart';
 import '../utils/geo.dart';
 import '../widgets/async_view.dart';
 import '../widgets/geo_map.dart';
@@ -35,6 +36,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
   Set<String> _selectedTypes = Set.of(garbageTypes);
   String? _truckId;
   Truck? _pickedTruck;
+  DateTime _scheduledFor = todayDay();
   bool _auto = true;
   final _picked = <String>{};
 
@@ -52,6 +54,19 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
   final _polygon = <GeoPoint>[];
   bool _polygonClosed = false;
   bool _busy = false;
+
+  Future<void> _pickDay(BuildContext context) async {
+    final today = todayDay();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _scheduledFor.isBefore(today) ? today : _scheduledFor,
+      firstDate: today,
+      lastDate: today.add(const Duration(days: 365)),
+    );
+    if (picked != null && mounted) {
+      setState(() => _scheduledFor = DateTime(picked.year, picked.month, picked.day));
+    }
+  }
 
   @override
   void dispose() {
@@ -88,6 +103,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
             _collectionPoints.isEmpty ? null : List.of(_collectionPoints),
         types: _selectedTypes.toList(),
         country: auth.country,
+        scheduledFor: _scheduledFor,
       );
       if (mounted) {
         showOk(context, 'Route assigned');
@@ -125,6 +141,15 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.calendar_month_outlined),
+                    title: const Text('Scheduled day'),
+                    subtitle: Text(formatDay(_scheduledFor)),
+                    trailing: const Icon(Icons.edit_outlined),
+                    onTap: () => _pickDay(context),
+                  ),
+                  const SizedBox(height: 12),
                   FutureBuilder(
                     future: auth.trucks.listTrucks(),
                     builder: (context, snapshot) => AsyncView<List<Truck>>(
@@ -145,7 +170,13 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(
-                                      '${truck.plateNumber} (${pretty(truck.status)})'),
+                                      '${truck.plateNumber} (${pretty(truck.availability)})'),
+                                  Text(
+                                    truck.loadSummary,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
+                                  ),
                                   if (truck.garbageTypes.isNotEmpty)
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
@@ -173,7 +204,7 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                         selectedItemBuilder: (context) => [
                           for (final truck in trucks)
                             Text(
-                                '${truck.plateNumber} (${pretty(truck.status)})'),
+                                '${truck.plateNumber} (${pretty(truck.availability)})'),
                         ],
                         onChanged: (v) => setState(() {
                           _truckId = v;

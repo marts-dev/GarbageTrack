@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../state/auth_provider.dart';
+import '../utils/dates.dart';
 import '../widgets/async_view.dart';
 import '../widgets/cards.dart';
 import '../widgets/geo_map.dart';
@@ -274,7 +275,7 @@ class _HeaderCard extends StatelessWidget {
                   label: 'Truck',
                   value: truck == null
                       ? 'Unavailable'
-                      : '${truck.plateNumber} · ${pretty(truck.status)} · ${pretty(truck.availability)}',
+                      : '${truck.plateNumber} · ${pretty(truck.availability)}',
                 ),
                 InfoRow(label: 'Depots', value: _depotSummary()),
                 InfoRow(
@@ -283,6 +284,11 @@ class _HeaderCard extends StatelessWidget {
                       ? 'Road-following'
                       : 'Straight-line',
                 ),
+                if (route.scheduledFor != null)
+                  InfoRow(
+                    label: 'Scheduled',
+                    value: formatDay(route.scheduledFor!),
+                  ),
                 if (route.collectionPoints.isNotEmpty)
                   InfoRow(
                     label: 'Collection points',

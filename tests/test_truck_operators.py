@@ -2,7 +2,7 @@
 
 Replaces the old collector truck-claim system. Binding is set only by
 logistics/admin via PATCH /trucks/{id}; collectors may collect-vicinity or
-change availability only on the truck whose operator_id is their own id.
+finish-route only on the truck whose operator_id is their own id.
 """
 
 import pytest
@@ -138,7 +138,7 @@ def test_patch_empty_body_400(client, dispatcher):
     assert response.status_code == 400
 
 
-def test_collect_and_availability_require_assignment(client, dispatcher, collector):
+def test_collect_and_finish_require_assignment(client, dispatcher, collector):
     truck = _make_truck(client, dispatcher["headers"])
     other = _make_truck(client, dispatcher["headers"], plate_number="OP-OTHER")
 
@@ -148,13 +148,12 @@ def test_collect_and_availability_require_assignment(client, dispatcher, collect
     assert collect_denied.status_code == 403
     assert "not assigned" in collect_denied.json()["detail"]
 
-    availability_denied = client.patch(
-        f"/api/v1/trucks/{truck['id']}/availability",
-        json={"availability": "working"},
+    finish_denied = client.post(
+        f"/api/v1/trucks/{truck['id']}/finish-route",
         headers=collector["headers"],
     )
-    assert availability_denied.status_code == 403
-    assert "not assigned" in availability_denied.json()["detail"]
+    assert finish_denied.status_code == 403
+    assert "not assigned" in finish_denied.json()["detail"]
 
     _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     assert (
@@ -165,13 +164,13 @@ def test_collect_and_availability_require_assignment(client, dispatcher, collect
         ).status_code
         == 200
     )
+    # Binding passes now; the 404 is the missing active route, not the gate.
     assert (
-        client.patch(
-            f"/api/v1/trucks/{truck['id']}/availability",
-            json={"availability": "working"},
+        client.post(
+            f"/api/v1/trucks/{truck['id']}/finish-route",
             headers=collector["headers"],
         ).status_code
-        == 200
+        == 404
     )
 
     assert (
@@ -183,9 +182,8 @@ def test_collect_and_availability_require_assignment(client, dispatcher, collect
         == 403
     )
     assert (
-        client.patch(
-            f"/api/v1/trucks/{other['id']}/availability",
-            json={"availability": "working"},
+        client.post(
+            f"/api/v1/trucks/{other['id']}/finish-route",
             headers=collector["headers"],
         ).status_code
         == 403
@@ -228,13 +226,12 @@ def test_logistics_and_admin_bypass_assignment(client, dispatcher, make_user):
             ).status_code
             == 200
         )
+        # Binding bypassed; the 404 is the missing active route, not the gate.
         assert (
-            client.patch(
-                f"/api/v1/trucks/{truck['id']}/availability",
-                json={"availability": "working"},
-                headers=headers,
+            client.post(
+                f"/api/v1/trucks/{truck['id']}/finish-route", headers=headers
             ).status_code
-            == 200
+            == 404
         )
 
 

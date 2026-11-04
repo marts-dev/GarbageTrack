@@ -10,6 +10,7 @@ import 'classify_screen.dart';
 import 'enroute_screen.dart';
 import 'location_screen.dart';
 import 'new_post_screen.dart';
+import 'pickup_calendar_screen.dart';
 import 'posts_screen.dart';
 
 class ResidentHomeScreen extends StatefulWidget {
@@ -134,6 +135,8 @@ class _ResidentHomeScreenState extends State<ResidentHomeScreen> {
         (Icons.add_a_photo_outlined, 'Report garbage', 'Post waste for collection',
             const NewPostScreen()),
       (Icons.list_alt_outlined, 'My reports', 'Track and confirm pickups', const PostsScreen()),
+      (Icons.calendar_month_outlined, 'Pickup calendar', 'See scheduled pickups',
+          const PickupCalendarScreen()),
       (Icons.local_shipping_outlined, 'Trucks nearby', 'See enroute collections',
           const EnrouteScreen()),
       (Icons.psychology_outlined, 'Classify waste', 'Ask the AI helper', const ClassifyScreen()),

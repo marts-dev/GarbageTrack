@@ -53,14 +53,12 @@ Map<String, dynamic> _truckJson(
   String id,
   String plate, {
   String? operatorId,
-  String status = 'scheduled',
   List<String> types = const ['plastic'],
   int? capacity = 10,
 }) =>
     {
       'id': id,
       'plate_number': plate,
-      'status': status,
       'availability': 'available',
       'garbage_types': types,
       'current_location': null,
@@ -159,7 +157,6 @@ void main() {
               jsonEncode(_truckJson(
                 't9',
                 body['plate_number'] as String,
-                status: body['status'] as String? ?? 'scheduled',
                 types: (body['garbage_types'] as List).cast<String>(),
                 capacity: (body['capacity'] as num?)?.toInt(),
               )),
@@ -346,6 +343,8 @@ void main() {
       await scrollTap(tester, find.text('Register truck'));
       expect(find.text('New truck'), findsNothing);
       expect(calls, contains('POST /api/v1/trucks/schedules'));
+      // Creation pins availability server-side; the form sends no status.
+      expect(postBodies.containsKey('status'), isFalse);
       final location =
           postBodies['current_location'] as Map<String, dynamic>;
       expect(location['longitude'], isA<double>());
