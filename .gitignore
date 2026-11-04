@@ -20,6 +20,8 @@ lib64/
 parts/
 sdist/
 var/
+# Local datasets (e.g. TACO for classifier training) — too large to commit.
+data/
 wheels/
 share/python-wheels/
 *.egg-info/
