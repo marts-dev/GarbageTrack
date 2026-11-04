@@ -191,6 +191,14 @@ def test_my_pickups_requires_auth(client):
     assert client.get("/api/v1/garbage/mine/pickups").status_code == 401
 
 
+def test_my_pickups_rejects_non_residents(client, make_user):
+    for role in ("collector", "logistics", "depot", "admin"):
+        user = make_user(role)
+        response = client.get("/api/v1/garbage/mine/pickups", headers=user["headers"])
+        assert response.status_code == 403, (role, response.text)
+        assert response.json()["detail"] == "only residents can view scheduled pickups"
+
+
 def test_collection_assignment_includes_scheduled_for(client, make_user):
     dispatcher = make_user("logistics")
     me = make_user()

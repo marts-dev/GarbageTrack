@@ -62,6 +62,11 @@ async def search_posts(
 
 @router.get("/mine/pickups", response_model=list[ScheduledPickupResponse])
 async def read_my_pickups(user: CurrentUser, db: Db):
+    if user.role != Role.RESIDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="only residents can view scheduled pickups",
+        )
     return await garbage_service.list_scheduled_pickups(db, user.id)
 
 
