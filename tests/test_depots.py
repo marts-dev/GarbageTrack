@@ -194,7 +194,7 @@ def test_receive_clears_load_and_records_receipt(
     assert [r["id"] for r in receipts.json()] == [body["id"]]
 
 
-def test_receive_rejects_types_depot_cannot_accept(
+def test_receive_partially_unloads_accepted_types(
     client, dispatcher, depot_user, make_user
 ):
     admin = make_user("admin")
@@ -210,7 +210,49 @@ def test_receive_rejects_types_depot_cannot_accept(
     assert collected["load"] == 2
     assert collected["load_by_type"] == {"glass": 1, "plastic": 1}
 
-    # The depot accepts plastic only.
+    # The depot accepts plastic only: it takes the plastic, the glass
+    # stays on the truck, and the truck stays working.
+    received = client.post(
+        "/api/v1/depots/mine/receive",
+        json={"truck_id": truck["id"]},
+        headers=depot_user["headers"],
+    )
+    assert received.status_code == 200, received.text
+    body = received.json()
+    assert body["load_cleared"] == 1
+    assert body["load_by_type"] == {"plastic": 1}
+    assert body["remaining_load"] == 1
+    assert body["remaining_by_type"] == {"glass": 1}
+
+    truck_after = client.get(
+        f"/api/v1/trucks/{truck['id']}", headers=dispatcher["headers"]
+    )
+    assert truck_after.json()["load"] == 1
+    assert truck_after.json()["load_by_type"] == {"glass": 1}
+    assert truck_after.json()["availability"] == "working"
+    receipts = client.get(
+        "/api/v1/depots/mine/receipts", headers=depot_user["headers"]
+    )
+    assert [r["id"] for r in receipts.json()] == [body["id"]]
+
+
+def test_receive_rejects_when_nothing_accepted(
+    client, dispatcher, depot_user, make_user
+):
+    admin = make_user("admin")
+    resident = make_user()
+    depot = _make_facility(
+        client, dispatcher["headers"], accepted_types=["paper"]
+    )
+    assert _bind(client, admin["headers"], depot_user["id"], depot["id"]).status_code == 200
+    truck = _make_truck(
+        client, dispatcher["headers"], garbage_types=["plastic", "glass"]
+    )
+    _make_post(client, resident, types=["glass", "plastic"])
+    collected = _collect(client, truck["id"], dispatcher["headers"])
+    assert collected["load"] == 2
+
+    # No overlap at all: nothing happens, no receipt recorded.
     rejected = client.post(
         "/api/v1/depots/mine/receive",
         json={"truck_id": truck["id"]},
@@ -227,6 +269,58 @@ def test_receive_rejects_types_depot_cannot_accept(
         "/api/v1/depots/mine/receipts", headers=depot_user["headers"]
     )
     assert receipts.json() == []
+
+
+def test_second_depot_completes_partial_unload(
+    client, dispatcher, depot_user, make_user
+):
+    admin = make_user("admin")
+    resident = make_user()
+    plastic_depot = _make_facility(client, dispatcher["headers"])
+    glass_depot = _make_facility(
+        client,
+        dispatcher["headers"],
+        name="South Depot",
+        accepted_types=["glass"],
+    )
+    assert (
+        _bind(client, admin["headers"], depot_user["id"], plastic_depot["id"]).status_code
+        == 200
+    )
+    glass_keeper = make_user("depot")
+    assert (
+        _bind(client, admin["headers"], glass_keeper["id"], glass_depot["id"]).status_code
+        == 200
+    )
+    truck = _make_truck(
+        client, dispatcher["headers"], garbage_types=["plastic", "glass"]
+    )
+    _make_post(client, resident, types=["glass", "plastic"])
+    _collect(client, truck["id"], dispatcher["headers"])
+
+    first = client.post(
+        "/api/v1/depots/mine/receive",
+        json={"truck_id": truck["id"]},
+        headers=depot_user["headers"],
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["remaining_load"] == 1
+
+    second = client.post(
+        "/api/v1/depots/mine/receive",
+        json={"truck_id": truck["id"]},
+        headers=glass_keeper["headers"],
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["load_cleared"] == 1
+    assert second.json()["remaining_load"] == 0
+
+    truck_after = client.get(
+        f"/api/v1/trucks/{truck['id']}", headers=dispatcher["headers"]
+    )
+    assert truck_after.json()["load"] == 0
+    assert truck_after.json()["load_by_type"] == {}
+    assert truck_after.json()["availability"] == "available"
 
 
 def test_depot_endpoints_enforce_role_and_binding(client, dispatcher, depot_user, make_user):

@@ -20,5 +20,7 @@ class DepotReceiptResponse(BaseModel):
     plate_number: str
     load_cleared: int
     load_by_type: dict[str, int] = {}
+    remaining_load: int = 0
+    remaining_by_type: dict[str, int] = {}
     received_by: str
     received_at: datetime

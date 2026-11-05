@@ -15,5 +15,7 @@ class DepotReceiptDocument(MongoDocument):
     plate_number: str
     load_cleared: int = Field(ge=0)
     load_by_type: dict[str, int] = Field(default_factory=dict)
+    remaining_load: int = Field(default=0, ge=0)
+    remaining_by_type: dict[str, int] = Field(default_factory=dict)
     received_by: str
     received_at: datetime = Field(default_factory=utcnow)

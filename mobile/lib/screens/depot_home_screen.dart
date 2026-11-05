@@ -30,7 +30,8 @@ class _DepotHomeScreenState extends State<DepotHomeScreen> {
         content: Text(
           'This unloads ${truck.load} collected ${truck.load == 1 ? 'item' : 'items'}'
           '${breakdown.isEmpty ? '' : ' ($breakdown)'} '
-          'and records a receipt. The truck returns to available.',
+          'and records a receipt. Anything this depot cannot accept '
+          'stays on the truck for another depot.',
         ),
         actions: [
           TextButton(
@@ -48,8 +49,11 @@ class _DepotHomeScreenState extends State<DepotHomeScreen> {
       final receipt =
           await context.read<AuthProvider>().depot.receive(truck.id);
       if (mounted) {
-        showOk(context,
-            'Received ${receipt.loadCleared} from ${receipt.plateNumber}');
+        showOk(
+          context,
+          'Received ${receipt.loadCleared} from ${receipt.plateNumber}'
+          '${receipt.remainingLoad > 0 ? ' · ${receipt.remainingLoad} left on truck' : ''}',
+        );
         setState(() => _reload++);
       }
     } catch (e) {
@@ -187,6 +191,9 @@ class _DepotHomeScreenState extends State<DepotHomeScreen> {
                                 '${receipt.loadCleared} cleared',
                                 if (receipt.loadByType.isNotEmpty)
                                   _breakdown(receipt.loadByType),
+                                if (receipt.remainingLoad > 0)
+                                  '${receipt.remainingLoad} remaining'
+                                  '${receipt.remainingByType.isEmpty ? '' : ' (${_breakdown(receipt.remainingByType)})'}',
                                 '${receipt.receivedAt.toLocal()}',
                               ].join(' · '),
                             ),

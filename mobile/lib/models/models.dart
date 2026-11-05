@@ -636,6 +636,8 @@ class DepotReceipt {
   final String plateNumber;
   final int loadCleared;
   final Map<String, int> loadByType;
+  final int remainingLoad;
+  final Map<String, int> remainingByType;
   final String receivedBy;
   final DateTime receivedAt;
 
@@ -646,6 +648,8 @@ class DepotReceipt {
     required this.plateNumber,
     required this.loadCleared,
     this.loadByType = const {},
+    this.remainingLoad = 0,
+    this.remainingByType = const {},
     required this.receivedBy,
     required this.receivedAt,
   });
@@ -657,6 +661,9 @@ class DepotReceipt {
         plateNumber: json['plate_number'] as String,
         loadCleared: (json['load_cleared'] as num).toInt(),
         loadByType: ((json['load_by_type'] as Map?) ?? {})
+            .map((k, v) => MapEntry(k as String, (v as num).toInt())),
+        remainingLoad: (json['remaining_load'] as num?)?.toInt() ?? 0,
+        remainingByType: ((json['remaining_by_type'] as Map?) ?? {})
             .map((k, v) => MapEntry(k as String, (v as num).toInt())),
         receivedBy: json['received_by'] as String,
         receivedAt: DateTime.parse(json['received_at'] as String),

@@ -311,8 +311,11 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
         }),
         builder: (context, loaded) {
           final truck = _freshTruck ?? loaded;
+          // Collecting is collector-only: everyone else gets the Route
+          // monitor view without the operate tab.
+          final canOperate = auth.user?.isCollector == true;
           return DefaultTabController(
-            length: 2,
+            length: canOperate ? 2 : 1,
             child: Column(
               children: [
                 Padding(
@@ -351,24 +354,22 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                           ],
                           // Header actions share one row so the header keeps its
                           // height and the tab body below keeps its space.
-                          // Collectors see these only on their own truck; the
-                          // API also rejects other operators with 403.
-                          if ((auth.user?.isCollector == true &&
-                                  truck.isOperatedBy(auth.user!.id)) ||
-                              auth.user?.isCollector != true) ...[
+                          // Operating (share/start/finish) is collector-only
+                          // and only on the collector's own truck; logistics
+                          // and admins monitor through the Route tab.
+                          if (auth.user?.isCollector == true &&
+                              truck.isOperatedBy(auth.user!.id)) ...[
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 8,
                               runSpacing: 8,
                               children: [
-                                if (auth.user?.isCollector == true &&
-                                    truck.isOperatedBy(auth.user!.id))
-                                  FilledButton.tonalIcon(
-                                    onPressed: _busy ? null : _shareLocation,
-                                    icon:
-                                        const Icon(Icons.my_location_outlined),
-                                    label: const Text('Share my location'),
-                                  ),
+                                FilledButton.tonalIcon(
+                                  onPressed: _busy ? null : _shareLocation,
+                                  icon:
+                                      const Icon(Icons.my_location_outlined),
+                                  label: const Text('Share my location'),
+                                ),
                                 // One run button per run state, gated on the
                                 // plan rather than truck availability: depot
                                 // receiving flips the truck back to available
@@ -434,12 +435,13 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                     ),
                   ),
                 ),
-                const TabBar(
-                  tabs: [
-                    Tab(text: 'Route'),
-                    Tab(text: 'Collect'),
-                  ],
-                ),
+                if (canOperate)
+                  const TabBar(
+                    tabs: [
+                      Tab(text: 'Route'),
+                      Tab(text: 'Collect'),
+                    ],
+                  ),
                 Expanded(
                   child: TabBarView(
                     children: [
@@ -450,16 +452,16 @@ class _TruckDetailBodyState extends State<TruckDetailBody> {
                             setState(() => _planFuture = _fetchPlan()),
                         tileProvider: widget.tileProvider,
                       ),
-                      _CollectTab(
-                        truck: truck,
-                        tileProvider: widget.tileProvider,
-                        positionProvider: widget.positionProvider,
-                        // Collectors act only on their assigned truck; the API
-                        // bypasses the binding check for logistics/admins.
-                        assignedGuarded: auth.user?.role == 'collector' &&
-                            !truck.isOperatedBy(auth.user!.id),
-                        onChanged: _refreshAfterCollect,
-                      ),
+                      if (canOperate)
+                        _CollectTab(
+                          truck: truck,
+                          tileProvider: widget.tileProvider,
+                          positionProvider: widget.positionProvider,
+                          // Collectors act only on their assigned truck.
+                          assignedGuarded:
+                              !truck.isOperatedBy(auth.user!.id),
+                          onChanged: _refreshAfterCollect,
+                        ),
                     ],
                   ),
                 ),

@@ -13,6 +13,23 @@ import '../widgets/cards.dart';
 import '../widgets/geo_map.dart';
 import '../widgets/type_dots.dart';
 
+/// Truck types no picked depot accepts, in truck order. Empty means full
+/// coverage — or no truck/depots picked yet, in which case there is
+/// nothing to warn about.
+List<String> uncoveredDepotTypes(
+  Truck? truck,
+  List<String> depotIds,
+  List<Facility> facilities,
+) {
+  final carried = truck?.garbageTypes ?? const <String>[];
+  if (carried.isEmpty || depotIds.isEmpty) return const [];
+  final accepted = <String>{
+    for (final facility in facilities)
+      if (depotIds.contains(facility.id)) ...facility.acceptedTypes,
+  };
+  return [for (final type in carried) if (!accepted.contains(type)) type];
+}
+
 /// Create a collection route for a truck: pick explicit posts, or let the
 /// server auto-generate from the truck's capacity, types, and position.
 ///
@@ -322,36 +339,51 @@ class _RouteCreateScreenState extends State<RouteCreateScreen> {
                                 'No facilities yet — register one first.');
                           }
 
-                          return Wrap(
-                            spacing: 8,
-                            runSpacing: 4,
+                          final uncovered = uncoveredDepotTypes(
+                            _pickedTruck,
+                            _depots,
+                            facilities,
+                          );
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              for (final facility in facilities)
-                                FilterChip(
-                                  label: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        '${facility.name} (${pretty(facility.kind)})'
-                                        '${_depots.isNotEmpty && _depots.last == facility.id ? ' · End' : ''}',
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                children: [
+                                  for (final facility in facilities)
+                                    FilterChip(
+                                      label: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            '${facility.name} (${pretty(facility.kind)})'
+                                            '${_depots.isNotEmpty && _depots.last == facility.id ? ' · End' : ''}',
+                                          ),
+                                          const SizedBox(height: 2),
+                                          TypeDots(facility.acceptedTypes,
+                                              size: 8),
+                                        ],
                                       ),
-                                      const SizedBox(height: 2),
-                                      TypeDots(facility.acceptedTypes, size: 8),
-                                    ],
-                                  ),
-                                  selected: _depots.contains(facility.id),
-                                  onSelected: (on) => setState(() {
-                                    if (on) {
-                                      if (!_depots.contains(facility.id)) {
-                                        _depots.add(facility.id);
-                                      }
-                                    } else {
-                                      _depots.remove(facility.id);
-                                    }
-                                  }),
-                                ),
+                                      selected: _depots.contains(facility.id),
+                                      onSelected: (on) => setState(() {
+                                        if (on) {
+                                          if (!_depots.contains(facility.id)) {
+                                            _depots.add(facility.id);
+                                          }
+                                        } else {
+                                          _depots.remove(facility.id);
+                                        }
+                                      }),
+                                    ),
+                                ],
+                              ),
+                              if (uncovered.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                _CoverageWarning(uncovered: uncovered),
+                              ],
                             ],
                           );
                         },
@@ -704,6 +736,48 @@ class _StepControls extends StatelessWidget {
 /// Review step: the whole run on one card before assigning. Depot names
 /// resolve from the facility listing so logistics can verify the visit
 /// order (last pick ends the route) at a glance.
+/// Non-blocking coverage warning: the truck can legally carry [uncovered]
+/// types that no picked depot accepts, so that load would stay aboard
+/// until another depot takes it.
+class _CoverageWarning extends StatelessWidget {
+  const _CoverageWarning({required this.uncovered});
+
+  final List<String> uncovered;
+
+  @override
+  Widget build(BuildContext context) {
+    final names = uncovered.map(pretty).join(', ');
+    final verb = uncovered.length == 1 ? 'has' : 'have';
+    final pronoun = uncovered.length == 1 ? 'it' : 'them';
+    return Card(
+      margin: EdgeInsets.zero,
+      color: Theme.of(context).colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.warning_amber_outlined,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '$names $verb nowhere to unload: no picked depot accepts $pronoun. '
+                'The truck will keep that load until another depot takes it.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ReviewStep extends StatelessWidget {
   const _ReviewStep({
     required this.truck,
@@ -772,16 +846,30 @@ class _ReviewStep extends StatelessWidget {
                     for (final id in depotIds)
                       if (names.containsKey(id)) names[id]!,
                   ];
-                  return InfoRow(
-                    label: 'Depots',
-                    value: known.isEmpty
-                        ? (depotIds.isEmpty
-                            ? 'No depots picked'
-                            : '${depotIds.length} picked')
-                        : [
-                            ...known.take(known.length - 1),
-                            '${known.last} · End',
-                          ].join(', '),
+                  final uncovered = uncoveredDepotTypes(
+                    truck,
+                    depotIds,
+                    facilities,
+                  );
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      InfoRow(
+                        label: 'Depots',
+                        value: known.isEmpty
+                            ? (depotIds.isEmpty
+                                ? 'No depots picked'
+                                : '${depotIds.length} picked')
+                            : [
+                                ...known.take(known.length - 1),
+                                '${known.last} · End',
+                              ].join(', '),
+                      ),
+                      if (uncovered.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _CoverageWarning(uncovered: uncovered),
+                      ],
+                    ],
                   );
                 },
               ),

@@ -675,6 +675,12 @@ void main() {
               path == '/api/v1/logistics/facilities') {
             return http.Response('[]', 200);
           }
+          if (request.method == 'GET' && path == '/api/v1/auth/users') {
+            return http.Response(
+              jsonEncode([_userJson('c1', 'c1@x.com', 'collector')]),
+              200,
+            );
+          }
           return http.Response(jsonEncode({'detail': 'nope'}), 404);
         });
 
@@ -753,6 +759,35 @@ void main() {
       expect(find.text('All clear'), findsNothing);
     });
 
+    testWidgets('unassigned row opens the edit form, not the detail',
+        (tester) async {
+      _useTallSurface(tester);
+      await pumpOverview(
+        tester,
+        attentionAuth(
+          summary: summaryWith(posted: 0),
+          routes: [],
+          trucks: [_truckJson('t1', 'AAA-1')],
+        ),
+      );
+      await tester.tap(find.text('No operator assigned'));
+      await tester.pumpAndSettle();
+
+      // The assign-operator form, with the collector picker loaded.
+      expect(find.text('Edit truck'), findsOneWidget);
+      expect(find.text('Assigned operator'), findsOneWidget);
+      await tester.tap(find.text('Unassigned'));
+      await tester.pumpAndSettle();
+      expect(find.text('Collector c1 · c1@x.com'), findsOneWidget);
+      await tester.tap(find.text('Collector c1 · c1@x.com').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Save changes'), findsOneWidget);
+      // No collector operate UI anywhere.
+      expect(find.text('Route'), findsNothing);
+      expect(find.text('Collect'), findsNothing);
+      expect(find.text('Share my location'), findsNothing);
+    });
+
     testWidgets('shows all clear when nothing needs attention', (tester) async {
       await pumpOverview(
         tester,
@@ -829,7 +864,8 @@ void main() {
       );
     });
 
-    testWidgets('truck rows open the truck detail', (tester) async {
+    testWidgets('truck rows open the form or the detail', (tester) async {
+      _useTallSurface(tester);
       Future<void> pump() => pumpOverview(
             tester,
             attentionAuth(
@@ -845,9 +881,9 @@ void main() {
       await pump();
       await tester.tap(find.text('AAA-1'));
       await tester.pumpAndSettle();
-      // The attention row is offstage under the push; only the detail
-      // header matches.
-      expect(find.text('AAA-1'), findsOneWidget);
+      // Unassigned: straight to the assign-operator form.
+      expect(find.text('Edit truck'), findsOneWidget);
+      expect(find.text('Assigned operator'), findsOneWidget);
 
       // Back to the overview for the second row (pumpWidget would keep
       // the pushed route: the element tree updates in place).
@@ -855,7 +891,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('BBB-2'));
       await tester.pumpAndSettle();
+      // Full: the route monitor detail, without operate UI.
       expect(find.text('BBB-2'), findsOneWidget);
+      expect(find.text('Collect'), findsNothing);
+      expect(find.text('Share my location'), findsNothing);
+      expect(find.text('Start run'), findsNothing);
+      expect(find.text('Finish run'), findsNothing);
     });
   });
 }

@@ -128,6 +128,7 @@ class _OverviewTabState extends State<_OverviewTab> {
                 summary: data.summary,
                 routes: data.routes,
                 trucks: data.trucks,
+                onChanged: () => setState(() => _reload++),
                 tileProvider: widget.tileProvider,
               ),
               Card(
@@ -217,12 +218,17 @@ class _NeedsAttentionSection extends StatelessWidget {
     required this.summary,
     required this.routes,
     required this.trucks,
+    required this.onChanged,
     this.tileProvider,
   });
 
   final GarbageSummary summary;
   final List<PlannedRoute> routes;
   final List<Truck> trucks;
+
+  /// Refreshes the overview after an inline fix (e.g. assigning an
+  /// operator from the unassigned row).
+  final VoidCallback onChanged;
   final TileProvider? tileProvider;
 
   @override
@@ -321,14 +327,16 @@ class _NeedsAttentionSection extends StatelessWidget {
                   Icons.chevron_right,
                   color: scheme.onSurfaceVariant,
                 ),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => TruckDetailScreen(
-                      truckId: truck.id,
-                      tileProvider: tileProvider,
+                // Logistics fixes this by assigning an operator, not by
+                // opening the collector's operate screen.
+                onTap: () async {
+                  final saved = await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => TruckFormScreen(existing: truck),
                     ),
-                  ),
-                ),
+                  );
+                  if (saved == true) onChanged();
+                },
               ),
             ),
           for (final truck in full)

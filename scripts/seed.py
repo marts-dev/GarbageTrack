@@ -7,6 +7,11 @@ Usage (from the repo root, uses .env unless overridden):
 Login with any seeded user; every password is ``Password123``:
     resident@example.com / collector@example.com /
     logistics@example.com / depot@example.com / admin@example.com
+
+Enroute walkthrough (resident home -> nearby trucks): NBB 5678 runs a live
+route ~2 km from the resident's collection point, so it shows up; NCC 9012
+runs one ~22 km away, so the 10 km filter hides it. NAA 1234 stays on an
+assigned (not started) run, so it never appears as enroute.
 """
 
 import argparse
@@ -35,7 +40,7 @@ from app.models.common import utcnow
 from app.models.facility import FacilityKind
 from app.models.garbage import GarbageStatus, GarbageType
 from app.models.geo import GeoLineString, GeoPoint
-from app.models.route import PlannedStop
+from app.models.route import PlannedRouteStatus, PlannedStop
 from app.models.truck import TruckAvailability
 
 PASSWORD = "Password123"
@@ -135,7 +140,7 @@ async def seed() -> dict:
             ).model_dump(by_alias=True, exclude={"id"})
         )
 
-        post_ids = [ObjectId() for _ in range(9)]
+        post_ids = [ObjectId() for _ in range(10)]
         specs = [
             # (lon, lat, types, description, status, days_ago, image?, district)
             # Anchor-relative layout; pt() shifts everything to CENTER_*.
@@ -146,7 +151,7 @@ async def seed() -> dict:
             (121.0290, 14.6490, [GarbageType.PAPER], "Stack of cartons",
              GarbageStatus.POSTED, 1, False, "Batasan Hills"),
             (121.0350, 14.6550, [GarbageType.GLASS], "Broken bottles near junction",
-             GarbageStatus.POSTED, 2, True, "Batasan Hills"),
+             GarbageStatus.SCHEDULED, 2, True, "Batasan Hills"),
             (121.0280, 14.6480, [GarbageType.ELECTRONIC], "Old CRT monitor",
              GarbageStatus.POSTED, 3, False, None),
             (121.0330, 14.6530, [GarbageType.PLASTIC], "Bottles at market entrance",
@@ -157,6 +162,8 @@ async def seed() -> dict:
              GarbageStatus.POSTED, 0, False, "Commonwealth"),
             (121.0360, 14.6560, [GarbageType.PLASTIC, GarbageType.PAPER], "Mixed dump behind plaza",
              GarbageStatus.SCHEDULED, 1, False, "Batasan Hills"),
+            (121.0315, 14.6515, [GarbageType.ORGANIC], "Kitchen scraps pickup today",
+             GarbageStatus.SCHEDULED, 0, False, "Commonwealth"),
         ]
         posts = []
         for pid, (lon, lat, types, desc, status, days, image, district) in zip(post_ids, specs):
@@ -198,7 +205,7 @@ async def seed() -> dict:
             truck_model.TruckDocument(
                 id=truck_ids[1],
                 plate_number="NBB 5678",
-                availability=TruckAvailability.AVAILABLE,
+                availability=TruckAvailability.WORKING,
                 garbage_types=[GarbageType.ORGANIC],
                 current_location=pt(121.0450, 14.6650),
                 eta_minutes=40,
@@ -208,8 +215,10 @@ async def seed() -> dict:
             truck_model.TruckDocument(
                 id=truck_ids[2],
                 plate_number="NCC 9012",
-                availability=TruckAvailability.AVAILABLE,
+                availability=TruckAvailability.WORKING,
                 garbage_types=[GarbageType.GLASS, GarbageType.METAL, GarbageType.BATTERY],
+                # ~22 km out: live run, but beyond the resident 10 km filter.
+                current_location=pt(121.2050, 14.7550),
                 capacity=6,
             ),
         ]
@@ -283,6 +292,48 @@ async def seed() -> dict:
                     ]
                 ),
                 geometry_source="straight",
+            ).model_dump(by_alias=True, exclude={"id"})
+        )
+        # Live run ~2 km from the resident's collection point: shows up in
+        # the resident enroute list.
+        live_stops = [
+            PlannedStop(
+                post_id=post_ids[9],
+                location=pt(specs[9][0], specs[9][1]),
+                types=specs[9][2],
+            )
+        ]
+        await db[route_model.COLLECTION].insert_one(
+            route_model.PlannedRouteDocument(
+                truck_id=truck_ids[1],
+                name="Today run - Commonwealth",
+                origin=pt(121.0450, 14.6650),
+                stops=live_stops,
+                scheduled_for=now.date().isoformat(),
+                status=PlannedRouteStatus.IN_PROGRESS,
+                depot_ids=[facility_ids[0]],
+                collection_points=[pt(121.0315, 14.6515)],
+            ).model_dump(by_alias=True, exclude={"id"})
+        )
+        # Live run ~22 km out: hidden by the resident 10 km filter, proving
+        # enroute is truly nearby.
+        far_stops = [
+            PlannedStop(
+                post_id=post_ids[3],
+                location=pt(specs[3][0], specs[3][1]),
+                types=specs[3][2],
+            )
+        ]
+        await db[route_model.COLLECTION].insert_one(
+            route_model.PlannedRouteDocument(
+                truck_id=truck_ids[2],
+                name="Far run - out of range",
+                origin=pt(121.2050, 14.7550),
+                stops=far_stops,
+                scheduled_for=now.date().isoformat(),
+                status=PlannedRouteStatus.IN_PROGRESS,
+                depot_ids=[facility_ids[1]],
+                collection_points=[pt(121.2055, 14.7555)],
             ).model_dump(by_alias=True, exclude={"id"})
         )
         counts = {name: await db[name].count_documents({}) for name in COLLECTIONS}

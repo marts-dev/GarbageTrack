@@ -23,6 +23,7 @@ class GarbageTrackApp extends StatelessWidget {
         darkTheme: AppTheme.dark,
         themeMode: ThemeMode.system,
         home: const AuthGate(),
+        debugShowCheckedModeBanner: false,
       ),
     );
   }

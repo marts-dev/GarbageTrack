@@ -114,6 +114,8 @@ MockClient _routeBackend({
   required List<Map<String, dynamic>> posts,
   Map<String, dynamic>? Function()? onRouteBody,
   List<double>? truckLocation,
+  List<String>? northAccepted,
+  List<String>? eastAccepted,
 }) {
   return MockClient((request) async {
     final path = request.url.path;
@@ -150,7 +152,7 @@ MockClient _routeBackend({
               'type': 'Point',
               'coordinates': [3.37, 6.45]
             },
-            'accepted_types': ['plastic'],
+            'accepted_types': northAccepted ?? ['plastic'],
             'address': null,
             'created_at': '2026-10-29T00:00:00Z',
             'updated_at': '2026-10-29T00:00:00Z',
@@ -163,7 +165,7 @@ MockClient _routeBackend({
               'type': 'Point',
               'coordinates': [3.40, 6.47]
             },
-            'accepted_types': ['plastic'],
+            'accepted_types': eastAccepted ?? ['plastic'],
             'address': null,
             'created_at': '2026-10-29T00:00:00Z',
             'updated_at': '2026-10-29T00:00:00Z',
@@ -908,6 +910,79 @@ void main() {
       await tester.tap(find.text('Assign route'));
       await tester.pumpAndSettle();
       expect(submitted['types'], ['plastic']);
+    });
+
+    testWidgets('warns when depots cannot take every truck type',
+        (tester) async {
+      final submitted = <String, dynamic>{};
+      final auth = AuthProvider.withUser(
+        _user('logistics', country: 'Nigeria'),
+        client: ApiClient(
+          baseUrl: 'http://x',
+          httpClient: _routeBackend(
+            posts: posts,
+            onRouteBody: () => submitted,
+            truckLocation: [3.10, 6.10],
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await _selectTruck(tester);
+
+      // North Depot takes plastic only; the truck also carries paper.
+      await _goToStep(tester, 'Depots');
+      await _scrollTo(tester, find.text('North Depot (Dump Site)'));
+      await tester.tap(find.text('North Depot (Dump Site)'));
+      await tester.pumpAndSettle();
+      await _scrollTo(tester, find.textContaining('nowhere to unload'));
+      expect(
+        find.textContaining('Paper has nowhere to unload'),
+        findsOneWidget,
+      );
+
+      // The warning repeats at review but never blocks submission.
+      await _goToStep(tester, 'Review');
+      await _scrollTo(tester, find.textContaining('nowhere to unload'));
+      expect(
+        find.textContaining('Paper has nowhere to unload'),
+        findsOneWidget,
+      );
+      await _scrollTo(tester, find.text('Assign route'));
+      await tester.tap(find.text('Assign route'));
+      await tester.pumpAndSettle();
+      expect(submitted['truck_id'], 't1');
+    });
+
+    testWidgets('no coverage warning when depots take every truck type',
+        (tester) async {
+      final auth = AuthProvider.withUser(
+        _user('logistics', country: 'Nigeria'),
+        client: ApiClient(
+          baseUrl: 'http://x',
+          httpClient: _routeBackend(
+            posts: posts,
+            eastAccepted: ['plastic', 'paper'],
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        _withAuth(auth, RouteCreateScreen(tileProvider: _StubTileProvider())),
+      );
+      await tester.pumpAndSettle();
+      await _selectTruck(tester);
+
+      await _goToStep(tester, 'Depots');
+      await _scrollTo(tester, find.text('East Recycler (Recycling)'));
+      await tester.tap(find.text('East Recycler (Recycling)'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('nowhere to unload'), findsNothing);
+
+      await _goToStep(tester, 'Review');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('nowhere to unload'), findsNothing);
     });
 
     testWidgets('posted garbage renders marker-clustered', (tester) async {

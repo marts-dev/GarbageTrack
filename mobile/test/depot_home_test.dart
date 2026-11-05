@@ -49,12 +49,19 @@ Map<String, dynamic> _truckJson({int load = 2}) => {
       'created_at': '2026-10-29T00:00:00Z',
     };
 
-Map<String, dynamic> _receiptJson() => {
+Map<String, dynamic> _receiptJson({
+  int cleared = 2,
+  int remaining = 0,
+  Map<String, int> remainingByType = const {},
+}) => {
       'id': 'r1',
       'depot_id': 'f1',
       'truck_id': 't1',
       'plate_number': 'DEP-1',
-      'load_cleared': 2,
+      'load_cleared': cleared,
+      'load_by_type': {'plastic': cleared},
+      'remaining_load': remaining,
+      'remaining_by_type': remainingByType,
       'received_by': 'u9',
       'received_at': '2026-11-03T08:00:00Z',
     };
@@ -150,6 +157,65 @@ void main() {
       expect(find.text('Received 2 from DEP-1'), findsOneWidget);
       expect(find.text('No trucks carrying a load.'), findsOneWidget);
       expect(find.textContaining('2 cleared'), findsOneWidget);
+    });
+
+    testWidgets('partial receive reports what stays on the truck',
+        (tester) async {
+      var received = false;
+      Map<String, dynamic> receipt() => _receiptJson(
+            cleared: 1,
+            remaining: 1,
+            remainingByType: const {'glass': 1},
+          );
+      final auth = AuthProvider.withUser(
+        _depotUser(),
+        client: ApiClient(
+          baseUrl: 'http://x',
+          httpClient: MockClient((request) async {
+            final path = request.url.path;
+            if (request.method == 'GET' && path == '/api/v1/depots/mine') {
+              return http.Response(jsonEncode(_depotJson()), 200);
+            }
+            if (request.method == 'GET' &&
+                path == '/api/v1/depots/mine/trucks') {
+              return http.Response(
+                  jsonEncode(received ? [] : [_truckJson()]), 200);
+            }
+            if (request.method == 'POST' &&
+                path == '/api/v1/depots/mine/receive') {
+              received = true;
+              return http.Response(jsonEncode(receipt()), 200);
+            }
+            if (request.method == 'GET' &&
+                path == '/api/v1/depots/mine/receipts') {
+              return http.Response(
+                  jsonEncode(received ? [receipt()] : []), 200);
+            }
+            return http.Response(jsonEncode({'detail': 'not found'}), 404);
+          }),
+        ),
+      );
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: auth,
+          child: const MaterialApp(home: DepotHomeScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Receive'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Receive'),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Received 1 from DEP-1 · 1 left on truck'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('1 remaining'), findsOneWidget);
     });
 
     testWidgets('unbound depot user joins through setup', (tester) async {
