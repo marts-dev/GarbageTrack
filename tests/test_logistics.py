@@ -39,6 +39,14 @@ def _make_truck(client, headers, **overrides):
     return response.json()
 
 
+def _assign(client, truck_id, operator_id, headers):
+    response = client.patch(
+        f"/api/v1/trucks/{truck_id}", json={"operator_id": operator_id}, headers=headers
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def _make_facility(client, headers, **overrides):
     payload = {
         "name": "Central Dump",
@@ -370,7 +378,9 @@ def test_create_route_rejects_second_active_route(client, dispatcher, make_user)
 
 def test_create_route_rejects_loaded_truck(client, dispatcher, make_user):
     me = make_user()
+    collector = make_user("collector")
     truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     depot = _make_facility(client, dispatcher["headers"])
     p1 = _make_post(client, me)
 
@@ -389,11 +399,11 @@ def test_create_route_rejects_loaded_truck(client, dispatcher, make_user):
     collected = client.post(
         f"/api/v1/trucks/{truck['id']}/collect-vicinity",
         json={"types": ["plastic"]},
-        headers=dispatcher["headers"],
+        headers=collector["headers"],
     )
     assert collected.json()["collected_count"] == 1
     finished = client.post(
-        f"/api/v1/trucks/{truck['id']}/finish-route", headers=dispatcher["headers"]
+        f"/api/v1/trucks/{truck['id']}/finish-route", headers=collector["headers"]
     )
     assert finished.status_code == 200, finished.text
 
@@ -759,6 +769,7 @@ def test_truck_planned_route_filters_collected_stops(client, dispatcher, make_us
     me = make_user()
     collector = make_user("collector")
     truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     depot = _make_facility(client, dispatcher["headers"])
     p1 = _make_post(client, me)
     p2 = _make_post(client, me)
@@ -773,7 +784,7 @@ def test_truck_planned_route_filters_collected_stops(client, dispatcher, make_us
     collected = client.post(
         f"/api/v1/trucks/{truck['id']}/collect-vicinity",
         json={},
-        headers=dispatcher["headers"],
+        headers=collector["headers"],
     )
     assert collected.status_code == 200, collected.text
 

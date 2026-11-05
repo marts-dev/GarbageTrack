@@ -119,11 +119,12 @@ def test_collect_marks_pending_and_skips_it_afterwards(
     assert second["load"] == 1
 
 
-def test_confirm_pending_then_collected(client, dispatcher, make_user):
+def test_confirm_pending_then_collected(client, dispatcher, collector, make_user):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     post = _make_post(client, resident)
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect(client, truck["id"], collector["headers"])
 
     confirmed = client.patch(
         f"/api/v1/garbage/{post['id']}/confirm-collected", headers=resident["headers"]
@@ -158,11 +159,12 @@ def test_confirm_from_posted_or_scheduled_has_nothing_to_confirm(
         assert response.json()["detail"] == "nothing to confirm yet"
 
 
-def test_dispute_reopens_pending_post(client, dispatcher, make_user):
+def test_dispute_reopens_pending_post(client, dispatcher, collector, make_user):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     post = _make_post(client, resident)
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect(client, truck["id"], collector["headers"])
     assert _status(client, post["id"], resident["headers"])["status"] == "pending_confirmation"
 
     disputed = client.patch(
@@ -177,17 +179,18 @@ def test_dispute_reopens_pending_post(client, dispatcher, make_user):
         f"/api/v1/garbage/{post['id']}/confirm-collected", headers=resident["headers"]
     )
     assert confirm.status_code == 409
-    recollected = _collect(client, truck["id"], dispatcher["headers"])
+    recollected = _collect(client, truck["id"], collector["headers"])
     assert recollected["post_ids"] == [post["id"]]
     assert _status(client, post["id"], resident["headers"])["status"] == "pending_confirmation"
 
 
-def test_dispute_non_pending_conflicts_and_unknown_404s(client, dispatcher, make_user):
+def test_dispute_non_pending_conflicts_and_unknown_404s(client, dispatcher, collector, make_user):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     posted = _make_post(client, resident)
     collected = _make_post(client, resident)
-    _collect(client, truck["id"], dispatcher["headers"], types=["plastic"])
+    _collect(client, truck["id"], collector["headers"], types=["plastic"])
     # Only `collected` should reach collected: dispute `posted` back first.
     client.patch(
         f"/api/v1/garbage/{posted['id']}/dispute-collected", headers=resident["headers"]
@@ -216,7 +219,8 @@ def test_dispute_is_owner_only(client, dispatcher, collector, make_user):
     admin = make_user("admin")
     truck = _make_truck(client, dispatcher["headers"])
     post = _make_post(client, resident)
-    _collect(client, truck["id"], dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    _collect(client, truck["id"], collector["headers"])
 
     for user in (stranger, collector, dispatcher, admin):
         response = client.patch(
@@ -239,7 +243,8 @@ def test_confirm_guard_parity_owner_or_operations(
     admin = make_user("admin")
     truck = _make_truck(client, dispatcher["headers"])
     posts = [_make_post(client, resident) for _ in range(4)]
-    result = _collect(client, truck["id"], dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
+    result = _collect(client, truck["id"], collector["headers"])
     assert result["collected_count"] == 4
 
     denied = client.patch(
@@ -265,6 +270,7 @@ def test_planned_route_drops_pending_and_dispute_resurrects(
 ):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"], garbage_types=["plastic", "glass"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     depot = _make_facility(client, dispatcher["headers"])
     plastic = _make_post(client, resident, types=["plastic"])
     glass = _make_post(client, resident, types=["glass"])
@@ -282,7 +288,7 @@ def test_planned_route_drops_pending_and_dispute_resurrects(
     assert stop_ids() == [plastic["id"], glass["id"]]
 
     # The fake DB ignores distance, so narrow the run to plastic explicitly.
-    _collect(client, truck["id"], dispatcher["headers"], types=["plastic"])
+    _collect(client, truck["id"], collector["headers"], types=["plastic"])
     assert _status(client, plastic["id"], resident["headers"])["status"] == "pending_confirmation"
     assert stop_ids() == [glass["id"]]
 
@@ -322,10 +328,11 @@ def test_collection_assignment_returns_truck_and_route(
 
 
 def test_collection_assignment_prefers_most_recent_route(
-    client, dispatcher, make_user, fake_db
+    client, dispatcher, collector, make_user, fake_db
 ):
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     depot = _make_facility(client, dispatcher["headers"])
     post = _make_post(client, resident)
     first = _make_route(
@@ -333,7 +340,7 @@ def test_collection_assignment_prefers_most_recent_route(
     )
     # One active route per truck: close the first before planning the next.
     finished = client.post(
-        f"/api/v1/trucks/{truck['id']}/finish-route", headers=dispatcher["headers"]
+        f"/api/v1/trucks/{truck['id']}/finish-route", headers=collector["headers"]
     )
     assert finished.status_code == 200, finished.text
     second = _make_route(

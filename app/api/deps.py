@@ -55,5 +55,18 @@ def require_roles(*roles: Role):
     return checker
 
 
+def require_collector():
+    """Operating a truck (collect/start/finish/claim/release/ping) is
+    collector-only, with no admin bypass: admins and logistics monitor
+    and manage through their own screens, never the cab."""
+
+    async def checker(user: CurrentUser) -> UserResponse:
+        if user.role == Role.COLLECTOR:
+            return user
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+
+    return checker
+
+
 def is_self_or_admin(user: UserResponse, user_id: str) -> bool:
     return user.role == Role.ADMIN or user.id == user_id

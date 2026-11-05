@@ -216,7 +216,7 @@ def test_reads_stay_assignment_free(client, dispatcher, collector, make_user):
     assert [t["operator_id"] for t in listed.json()] == [None]
 
 
-def test_logistics_and_admin_bypass_assignment(client, dispatcher, make_user):
+def test_logistics_and_admin_cannot_operate(client, dispatcher, make_user):
     admin = make_user("admin")
     truck = _make_truck(client, dispatcher["headers"])
     for headers in (dispatcher["headers"], admin["headers"]):
@@ -224,14 +224,46 @@ def test_logistics_and_admin_bypass_assignment(client, dispatcher, make_user):
             client.post(
                 f"/api/v1/trucks/{truck['id']}/collect-vicinity", json={}, headers=headers
             ).status_code
-            == 200
+            == 403
         )
-        # Binding bypassed; the 404 is the missing active route, not the gate.
         assert (
             client.post(
                 f"/api/v1/trucks/{truck['id']}/finish-route", headers=headers
             ).status_code
-            == 404
+            == 403
+        )
+        assert (
+            client.post(
+                f"/api/v1/trucks/{truck['id']}/start-route", headers=headers
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                f"/api/v1/trucks/{truck['id']}/claim", headers=headers
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                f"/api/v1/trucks/{truck['id']}/release", headers=headers
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                f"/api/v1/trucks/{truck['id']}/location",
+                json={"longitude": 3.38, "latitude": 6.46},
+                headers=headers,
+            ).status_code
+            == 403
+        )
+        # Reads stay open: monitoring is their job.
+        assert (
+            client.get(
+                f"/api/v1/trucks/{truck['id']}", headers=headers
+            ).status_code
+            == 200
         )
 
 
@@ -294,23 +326,23 @@ def test_collector_ping_other_or_unassigned_truck_403(client, dispatcher, collec
     assert _ping(client, free["id"], collector["headers"]).status_code == 403
 
 
-def test_logistics_pings_any_truck(client, dispatcher, collector):
+def test_logistics_ping_forbidden(client, dispatcher, collector):
     truck = _make_truck(client, dispatcher["headers"])
     _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     response = _ping(client, truck["id"], dispatcher["headers"], lon=1.0, lat=2.0)
-    assert response.status_code == 200, response.text
-    assert response.json()["current_location"]["coordinates"] == [1.0, 2.0]
+    assert response.status_code == 403
 
 
-def test_ping_unknown_truck_404_and_bad_coords_422(client, dispatcher):
+def test_ping_unknown_truck_404_and_bad_coords_422(client, dispatcher, collector):
     assert (
-        _ping(client, "000000000000000000000000", dispatcher["headers"]).status_code == 404
+        _ping(client, "000000000000000000000000", collector["headers"]).status_code == 404
     )
     truck = _make_truck(client, dispatcher["headers"])
+    _assign(client, truck["id"], collector["id"], dispatcher["headers"])
     bad = client.post(
         f"/api/v1/trucks/{truck['id']}/location",
         json={"longitude": 999, "latitude": 6.46},
-        headers=dispatcher["headers"],
+        headers=collector["headers"],
     )
     assert bad.status_code == 422
 

@@ -70,7 +70,9 @@ when assigning a truck operator); users edit their own display name with
 Role map: residents use locations/garbage/AI and confirm their own posts;
 `collector` unlocks truck route/collect/availability and confirming any post;
 `logistics` unlocks truck scheduling and the logistics router; `admin` bypasses
-all role checks. Health probes stay public.
+all role checks except the six truck operate endpoints
+(collect/start/finish/claim/release/location), which are collector-only.
+Health probes stay public.
 
 ## API (v1)
 
@@ -123,8 +125,8 @@ Collector API:
   collect would grab (same origin/radius/types guard, no writes)
 - `POST /api/v1/trucks/{truck_id}/collect-vicinity` — mark posted/scheduled
   garbage within `radius_meters` (default 30) as collected; bumps the
-  truck's load and auto-marks it `full` at capacity (403 unless the truck is
-  assigned to you; logistics/admin bypass)
+  truck's load and auto-marks it `full` at capacity (collector-only, 403
+  unless the truck is assigned to you)
 - `PATCH /api/v1/trucks/{truck_id}/availability` — set `available`, `working`,
   or `full` (returning to `available` resets the load; same 403 rule)
 - `POST /api/v1/trucks/{truck_id}/location` — share the truck's GPS

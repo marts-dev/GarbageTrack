@@ -1,6 +1,7 @@
 def test_create_schedule_and_list_enroute(client, make_user):
     dispatcher = make_user("logistics")
     resident = make_user()
+    collector = make_user("collector")
     created = client.post(
         "/api/v1/trucks/schedules",
         json={
@@ -59,10 +60,16 @@ def test_create_schedule_and_list_enroute(client, make_user):
     assert (
         client.get("/api/v1/trucks/enroute", headers=resident["headers"]).json() == []
     )
+    bound = client.patch(
+        f"/api/v1/trucks/{created.json()['id']}",
+        json={"operator_id": collector["id"]},
+        headers=dispatcher["headers"],
+    )
+    assert bound.status_code == 200, bound.text
     collect = client.post(
         f"/api/v1/trucks/{created.json()['id']}/collect-vicinity",
         json={},
-        headers=dispatcher["headers"],
+        headers=collector["headers"],
     )
     assert collect.status_code == 200, collect.text
 

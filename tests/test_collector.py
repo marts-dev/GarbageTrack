@@ -425,7 +425,7 @@ def test_claim_rejects_non_collectors(client, dispatcher, make_user):
         client.post(
             f"/api/v1/trucks/{truck['id']}/claim", headers=dispatcher["headers"]
         ).status_code
-        == 422
+        == 403
     )
 
 

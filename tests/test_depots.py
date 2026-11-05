@@ -60,6 +60,18 @@ def _collect(client, truck_id, headers, **payload):
     return response.json()
 
 
+def _collect_as_bound(client, dispatcher, make_user, truck_id, **payload):
+    """Collect as a collector bound to the truck (operate is collector-only)."""
+    collector = make_user("collector")
+    bound = client.patch(
+        f"/api/v1/trucks/{truck_id}",
+        json={"operator_id": collector["id"]},
+        headers=dispatcher["headers"],
+    )
+    assert bound.status_code == 200, bound.text
+    return _collect(client, truck_id, collector["headers"], **payload)
+
+
 def _bind(client, admin_headers, user_id, depot_id):
     return client.patch(
         f"/api/v1/auth/users/{user_id}/depot",
@@ -152,7 +164,7 @@ def test_receive_clears_load_and_records_receipt(
     truck = _make_truck(client, dispatcher["headers"])
     _make_post(client, resident)
     _make_post(client, resident)
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect_as_bound(client, dispatcher, make_user, truck["id"])
 
     mine = client.get("/api/v1/depots/mine", headers=depot_user["headers"])
     assert mine.status_code == 200, mine.text
@@ -206,7 +218,7 @@ def test_receive_partially_unloads_accepted_types(
     )
     # A two-type post consumes two capacity units, tracked per type.
     _make_post(client, resident, types=["glass", "plastic"])
-    collected = _collect(client, truck["id"], dispatcher["headers"])
+    collected = _collect_as_bound(client, dispatcher, make_user, truck["id"])
     assert collected["load"] == 2
     assert collected["load_by_type"] == {"glass": 1, "plastic": 1}
 
@@ -249,7 +261,7 @@ def test_receive_rejects_when_nothing_accepted(
         client, dispatcher["headers"], garbage_types=["plastic", "glass"]
     )
     _make_post(client, resident, types=["glass", "plastic"])
-    collected = _collect(client, truck["id"], dispatcher["headers"])
+    collected = _collect_as_bound(client, dispatcher, make_user, truck["id"])
     assert collected["load"] == 2
 
     # No overlap at all: nothing happens, no receipt recorded.
@@ -296,7 +308,7 @@ def test_second_depot_completes_partial_unload(
         client, dispatcher["headers"], garbage_types=["plastic", "glass"]
     )
     _make_post(client, resident, types=["glass", "plastic"])
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect_as_bound(client, dispatcher, make_user, truck["id"])
 
     first = client.post(
         "/api/v1/depots/mine/receive",
@@ -455,7 +467,7 @@ def test_dispute_returns_load_to_collecting_truck(
     truck = _make_truck(client, dispatcher["headers"])
     p1 = _make_post(client, resident)
     p2 = _make_post(client, resident)
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect_as_bound(client, dispatcher, make_user, truck["id"])
 
     def truck_state():
         return client.get(
@@ -493,7 +505,7 @@ def test_dispute_after_receipt_floors_load_at_zero(
     assert _bind(client, admin["headers"], depot_user["id"], depot["id"]).status_code == 200
     truck = _make_truck(client, dispatcher["headers"])
     post = _make_post(client, resident)
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect_as_bound(client, dispatcher, make_user, truck["id"])
     received = client.post(
         "/api/v1/depots/mine/receive",
         json={"truck_id": truck["id"]},
@@ -517,7 +529,7 @@ def test_dispute_returns_load_without_touching_availability(
     resident = make_user()
     truck = _make_truck(client, dispatcher["headers"], capacity=1)
     post = _make_post(client, resident)
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect_as_bound(client, dispatcher, make_user, truck["id"])
 
     def truck_state():
         return client.get(

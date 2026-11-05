@@ -37,6 +37,16 @@ def _collect(client, truck_id, headers):
     return response.json()
 
 
+def _collect_as_bound(client, dispatcher, collector, truck_id):
+    bound = client.patch(
+        f"/api/v1/trucks/{truck_id}",
+        json={"operator_id": collector["id"]},
+        headers=dispatcher["headers"],
+    )
+    assert bound.status_code == 200, bound.text
+    return _collect(client, truck_id, collector["headers"])
+
+
 def test_create_post_with_multiple_types_and_image(client, make_user, fake_db):
     me = make_user()
     response = client.post(
@@ -126,6 +136,7 @@ def test_list_posts_filters_by_user_and_status(client, make_user):
 def test_confirm_collected_transitions_and_conflicts(client, make_user):
     me = make_user()
     dispatcher = make_user("logistics")
+    collector = make_user("collector")
     truck = _make_truck(client, dispatcher["headers"])
     created = client.post(
         "/api/v1/garbage", json=_post_payload(me["id"]), headers=me["headers"]
@@ -138,7 +149,7 @@ def test_confirm_collected_transitions_and_conflicts(client, make_user):
     assert too_early.status_code == 409
     assert too_early.json()["detail"] == "nothing to confirm yet"
 
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect_as_bound(client, dispatcher, collector, truck["id"])
     pending = client.get(f"/api/v1/garbage/{post_id}", headers=me["headers"]).json()
     assert pending["status"] == "pending_confirmation"
 
@@ -172,7 +183,7 @@ def test_confirm_collected_by_stranger_forbidden_but_collector_allowed(client, m
     )
     assert denied.status_code == 403
 
-    _collect(client, truck["id"], dispatcher["headers"])
+    _collect_as_bound(client, dispatcher, collector, truck["id"])
     allowed = client.patch(
         f"/api/v1/garbage/{created['id']}/confirm-collected", headers=collector["headers"]
     )

@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.deps import CurrentUser, Db, require_roles
+from app.api.deps import CurrentUser, Db, require_collector, require_roles
 from app.models.auth import Role
 from app.models.garbage import GarbageType
 from app.models.truck import TruckAvailability
@@ -39,6 +39,7 @@ router = APIRouter(prefix="/trucks", tags=["trucks"])
 Longitude = Annotated[float | None, Query(ge=-180, le=180)]
 Latitude = Annotated[float | None, Query(ge=-90, le=90)]
 Collector = Annotated[UserResponse, Depends(require_roles(Role.COLLECTOR, Role.LOGISTICS))]
+Operator = Annotated[UserResponse, Depends(require_collector())]
 Dispatcher = Annotated[UserResponse, Depends(require_roles(Role.LOGISTICS))]
 
 
@@ -174,7 +175,7 @@ async def read_collect_candidates(
 
 
 @router.post("/{truck_id}/collect-vicinity", response_model=CollectVicinityResponse)
-async def collect_vicinity(truck_id: str, payload: CollectVicinityRequest, user: Collector, db: Db):
+async def collect_vicinity(truck_id: str, payload: CollectVicinityRequest, user: Operator, db: Db):
     try:
         return await trucks_service.collect_vicinity(db, truck_id, payload, user)
     except TruckNotFoundError:
@@ -186,7 +187,7 @@ async def collect_vicinity(truck_id: str, payload: CollectVicinityRequest, user:
 
 
 @router.post("/{truck_id}/finish-route", response_model=TruckResponse)
-async def finish_route(truck_id: str, user: Collector, db: Db):
+async def finish_route(truck_id: str, user: Operator, db: Db):
     """Close the truck's active run: route done, truck free for assignment."""
     try:
         return await trucks_service.finish_active_route(db, truck_id, user)
@@ -201,7 +202,7 @@ async def finish_route(truck_id: str, user: Collector, db: Db):
 
 
 @router.post("/{truck_id}/start-route", response_model=TruckResponse)
-async def start_route(truck_id: str, user: Collector, db: Db):
+async def start_route(truck_id: str, user: Operator, db: Db):
     """Start the truck's run: assigned routes go in progress."""
     try:
         return await trucks_service.start_assigned_route(db, truck_id, user)
@@ -216,7 +217,7 @@ async def start_route(truck_id: str, user: Collector, db: Db):
 
 
 @router.post("/{truck_id}/claim", response_model=TruckResponse)
-async def claim_truck(truck_id: str, user: Collector, db: Db):
+async def claim_truck(truck_id: str, user: Operator, db: Db):
     """Bind the calling collector to an unassigned truck."""
     try:
         return await trucks_service.claim_truck(db, truck_id, user)
@@ -233,7 +234,7 @@ async def claim_truck(truck_id: str, user: Collector, db: Db):
 
 
 @router.post("/{truck_id}/release", response_model=TruckResponse)
-async def release_truck(truck_id: str, user: Collector, db: Db):
+async def release_truck(truck_id: str, user: Operator, db: Db):
     """Unbind the calling collector from their truck."""
     try:
         return await trucks_service.release_truck(db, truck_id, user)
@@ -246,7 +247,7 @@ async def release_truck(truck_id: str, user: Collector, db: Db):
 
 
 @router.post("/{truck_id}/location", response_model=TruckResponse)
-async def update_location(truck_id: str, payload: TruckLocation, user: Collector, db: Db):
+async def update_location(truck_id: str, payload: TruckLocation, user: Operator, db: Db):
     try:
         return await trucks_service.update_truck_location(db, truck_id, payload, user)
     except TruckNotFoundError:
