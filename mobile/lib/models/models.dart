@@ -166,6 +166,7 @@ class GarbagePost {
   final String? district;
   final bool hasImage;
   final String? imageContentType;
+  final bool trainingConsent;
   final String status;
   final DateTime createdAt;
   final DateTime? collectedAt;
@@ -181,6 +182,7 @@ class GarbagePost {
     this.district,
     required this.hasImage,
     this.imageContentType,
+    this.trainingConsent = false,
     this.collectedAt,
   });
 
@@ -193,6 +195,7 @@ class GarbagePost {
         district: json['district'] as String?,
         hasImage: json['has_image'] as bool? ?? false,
         imageContentType: json['image_content_type'] as String?,
+        trainingConsent: json['training_consent'] as bool? ?? false,
         status: json['status'] as String,
         createdAt: DateTime.parse(json['created_at'] as String),
         collectedAt: json['collected_at'] == null

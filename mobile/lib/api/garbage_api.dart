@@ -14,6 +14,7 @@ class GarbageApi {
     String? district,
     String? imageBase64,
     String? imageContentType,
+    bool trainingConsent = false,
   }) async {
     final body = await _client.postJson('/garbage', body: {
       'user_id': userId,
@@ -24,6 +25,7 @@ class GarbageApi {
       if (district != null && district.isNotEmpty) 'district': district,
       if (imageBase64 != null) 'image_base64': imageBase64,
       if (imageContentType != null) 'image_content_type': imageContentType,
+      'training_consent': trainingConsent,
     });
     return GarbagePost.fromJson(body as Map<String, dynamic>);
   }

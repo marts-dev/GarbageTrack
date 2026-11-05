@@ -40,23 +40,6 @@ class NoCollectionAssignmentError(Exception):
     pass
 
 
-def _to_response(doc: dict) -> GarbagePostResponse:
-    return GarbagePostResponse(
-        id=str(doc["_id"]),
-        user_id=doc["user_id"],
-        location=doc["location"],
-        types=doc["types"],
-        description=doc.get("description"),
-        district=doc.get("district"),
-        country=doc.get("country"),
-        has_image=doc.get("image_base64") is not None,
-        image_content_type=doc.get("image_content_type"),
-        status=doc["status"],
-        created_at=doc["created_at"],
-        collected_at=doc.get("collected_at"),
-    )
-
-
 def _near_filter(longitude: float, latitude: float, max_meters: float) -> dict:
     return {
         "location": {
@@ -80,11 +63,12 @@ async def create_post(
         country=country,
         image_base64=payload.image_base64,
         image_content_type=payload.image_content_type,
+        training_consent=payload.training_consent,
     )
     stored = doc.model_dump(by_alias=True, exclude={"id"})
     result = await db[garbage_model.COLLECTION].insert_one(stored)
     stored["_id"] = result.inserted_id
-    return _to_response(stored)
+    return GarbagePostResponse.from_doc(stored)
 
 
 async def get_post(db: AsyncDatabase, post_id: str) -> GarbagePostResponse:
@@ -95,7 +79,7 @@ async def get_post(db: AsyncDatabase, post_id: str) -> GarbagePostResponse:
     stored = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
     if stored is None:
         raise GarbagePostNotFoundError(post_id)
-    return _to_response(stored)
+    return GarbagePostResponse.from_doc(stored)
 
 
 async def list_posts(
@@ -121,7 +105,7 @@ async def list_posts(
     if longitude is not None and latitude is not None:
         query.update(_near_filter(longitude, latitude, max_meters))
     cursor = db[garbage_model.COLLECTION].find(query).limit(limit)
-    return [_to_response(doc) async for doc in cursor]
+    return [GarbagePostResponse.from_doc(doc) async for doc in cursor]
 
 
 async def confirm_collected(db: AsyncDatabase, post_id: str) -> GarbagePostResponse:
@@ -141,7 +125,7 @@ async def confirm_collected(db: AsyncDatabase, post_id: str) -> GarbagePostRespo
         return_document=ReturnDocument.AFTER,
     )
     if stored is not None:
-        return _to_response(stored)
+        return GarbagePostResponse.from_doc(stored)
     existing = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
     if existing is None:
         raise GarbagePostNotFoundError(post_id)
@@ -175,7 +159,7 @@ async def dispute_collected(db: AsyncDatabase, post_id: str) -> GarbagePostRespo
             stored.get("collected_by_truck_id"),
             [str(t) for t in stored.get("types", [])],
         )
-        return _to_response(stored)
+        return GarbagePostResponse.from_doc(stored)
     existing = await db[garbage_model.COLLECTION].find_one({"_id": object_id})
     if existing is None:
         raise GarbagePostNotFoundError(post_id)

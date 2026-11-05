@@ -16,10 +16,13 @@ import '../widgets/inputs.dart';
 import 'location_screen.dart';
 
 class NewPostScreen extends StatefulWidget {
-  const NewPostScreen({super.key, this.tileProvider});
+  const NewPostScreen({super.key, this.tileProvider, this.imageProvider});
 
   /// Overrides tile loading (e.g. an offline stub in widget tests).
   final TileProvider? tileProvider;
+
+  /// Overrides photo capture (e.g. a canned file in widget tests).
+  final Future<XFile?> Function(ImageSource)? imageProvider;
 
   @override
   State<NewPostScreen> createState() => _NewPostScreenState();
@@ -31,6 +34,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
   final _types = <String>{};
   Uint8List? _imageBytes;
   String? _imageMime;
+  bool _trainingConsent = false;
   bool _busy = false;
 
   /// Saved collection point the report is filed from. Null when the
@@ -74,7 +78,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final picked = await ImagePicker().pickImage(source: source, maxWidth: 1600);
+      final picked = await (widget.imageProvider?.call(source) ??
+          ImagePicker().pickImage(source: source, maxWidth: 1600));
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
       if (bytes.lengthInBytes > 5 * 1024 * 1024) {
@@ -108,6 +113,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
         district: _district.text.trim().isEmpty ? null : _district.text.trim(),
         imageBase64: _imageBytes == null ? null : base64Encode(_imageBytes!),
         imageContentType: _imageBytes == null ? null : _imageMime,
+        trainingConsent: _imageBytes != null && _trainingConsent,
       );
       if (mounted) {
         showOk(context, 'Report submitted');
@@ -249,9 +255,22 @@ class _NewPostScreenState extends State<NewPostScreen> {
               child: Image.memory(_imageBytes!, height: 180, fit: BoxFit.cover),
             ),
             TextButton.icon(
-              onPressed: () => setState(() => _imageBytes = null),
+              onPressed: () => setState(() {
+                _imageBytes = null;
+                _imageMime = null;
+                _trainingConsent = false;
+              }),
               icon: const Icon(Icons.delete_outline),
               label: const Text('Remove photo'),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Use this photo to improve sorting'),
+              subtitle: const Text(
+                'Allow this photo to be used for classifier training once the report is collected.',
+              ),
+              value: _trainingConsent,
+              onChanged: (v) => setState(() => _trainingConsent = v),
             ),
           ] else
             Row(

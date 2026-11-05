@@ -40,6 +40,9 @@ class GarbagePostDocument(MongoDocument):
     country: str | None = None
     image_base64: str | None = None
     image_content_type: str | None = None
+    # Phase 2 flywheel: the resident opted this photo into classifier
+    # training at report time. Export only ever reads consented posts.
+    training_consent: bool = False
     status: GarbageStatus = GarbageStatus.POSTED
     created_at: datetime = Field(default_factory=utcnow)
     collected_at: datetime | None = None

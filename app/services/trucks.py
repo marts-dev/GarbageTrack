@@ -449,23 +449,6 @@ def _vicinity_query(origin: GeoPoint, radius_meters: float, wanted_types: list[s
     }
 
 
-def _to_post_response(doc: dict) -> GarbagePostResponse:
-    return GarbagePostResponse(
-        id=str(doc["_id"]),
-        user_id=doc["user_id"],
-        location=doc["location"],
-        types=doc["types"],
-        description=doc.get("description"),
-        district=doc.get("district"),
-        country=doc.get("country"),
-        has_image=doc.get("image_base64") is not None,
-        image_content_type=doc.get("image_content_type"),
-        status=doc["status"],
-        created_at=doc["created_at"],
-        collected_at=doc.get("collected_at"),
-    )
-
-
 async def find_collect_candidates(
     db: AsyncDatabase,
     truck_id: str,
@@ -488,7 +471,7 @@ async def find_collect_candidates(
         db[garbage_model.COLLECTION].find(_vicinity_query(origin, radius_meters, wanted_types))
         .limit(limit)
     )
-    return [_to_post_response(doc) async for doc in cursor]
+    return [GarbagePostResponse.from_doc(doc) async for doc in cursor]
 
 
 async def collect_vicinity(

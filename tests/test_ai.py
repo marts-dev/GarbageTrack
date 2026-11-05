@@ -198,6 +198,76 @@ def test_load_samples_merges_labels_and_reports_fallbacks(tmp_path):
     assert skipped_tiny == 1
 
 
+def _manifest_dir(tmp_path, space=None):
+    images = tmp_path / "images"
+    images.mkdir()
+    Image.new("RGB", (40, 30), (10, 200, 10)).save(images / "a.png")
+    manifest = {
+        "exported_on": "2026-11-05",
+        "label_space": (
+            space if space is not None else [t.value for t in GarbageType]
+        ),
+        "samples": [
+            {
+                "image_id": "p1",
+                "file": "images/a.png",
+                "label": "plastic",
+                "label_index": 0,
+            },
+            {
+                "image_id": "p1",
+                "file": "images/a.png",
+                "label": "paper",
+                "label_index": 2,
+            },
+            {
+                "image_id": "p2",
+                "file": "images/missing.png",
+                "label": "glass",
+                "label_index": 3,
+            },
+        ],
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest))
+    return path
+
+
+def test_load_manifest_samples_full_frame_boxes(tmp_path):
+    train = _train_module()
+    samples, skipped = train.load_manifest_samples(_manifest_dir(tmp_path))
+    assert skipped == 1
+    assert [(s["image_id"], s["label"]) for s in samples] == [
+        ("p1", train.CLASSES.index("plastic")),
+        ("p1", train.CLASSES.index("paper")),
+    ]
+    assert samples[0]["box"] == (0.0, 0.0, 40.0, 30.0)
+    assert samples[0]["path"].endswith("images/a.png")
+
+
+def test_load_manifest_samples_rejects_label_drift(tmp_path):
+    train = _train_module()
+    path = _manifest_dir(tmp_path, space=["plastic"])
+    with pytest.raises(ValueError, match="label_space"):
+        train.load_manifest_samples(path)
+
+
+def test_split_by_image_handles_mixed_sources():
+    train = _train_module()
+    samples = [
+        {"image_id": 6, "label": 0},
+        {"image_id": "p1", "label": 1},
+        {"image_id": "p1", "label": 2},
+        {"image_id": 12, "label": 0},
+    ]
+    first = train.split_by_image(samples, 0.5, 7)
+    again = train.split_by_image(samples, 0.5, 7)
+    assert first == again
+    # The two crops of p1 never split across the fold.
+    train_fold, _ = first
+    assert sum(s["image_id"] == "p1" for s in train_fold) in (0, 2)
+
+
 def test_split_by_image_keeps_crops_together(tmp_path):
     train = _train_module()
     samples, _, _ = train.load_samples(_coco_file(tmp_path), tmp_path)

@@ -15,6 +15,11 @@ Usage (needs the ai extra):
     uv run --extra ai python scripts/train_classifier.py --data-dir data/taco --out var/ai/classifier.pt
     uv run --extra ai python scripts/train_classifier.py --data-dir data/taco --out /tmp/smoke.pt --limit 200 --epochs 1
 
+Phase 2 flywheel: unzip an admin /ai/training-export bundle next to TACO
+and merge its verified resident photos (full-frame samples) with:
+    uv run --extra ai python scripts/train_classifier.py --data-dir data/taco \
+        --extra-manifest data/phase2/manifest.json --out var/ai/classifier.pt
+
 Expect ~10k crops; head-only training runs on CPU in well under an hour.
 """
 
@@ -56,6 +61,12 @@ def parse_args(argv=None):
     parser.add_argument("--device", default="auto", choices=("auto", "cpu", "cuda", "mps"))
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--report", default=None, help="also write the JSON report here")
+    parser.add_argument(
+        "--extra-manifest",
+        action="append",
+        default=None,
+        help="phase-2 manifest.json from /ai/training-export (repeatable); images resolve next to it",
+    )
     return parser.parse_args(argv)
 
 
@@ -116,13 +127,52 @@ def load_samples(ann_path, images_dir, limit=0):
     return samples, dict(fallbacks), skipped_tiny
 
 
+def load_manifest_samples(manifest_path, limit=0):
+    """(samples, skipped_missing) from a phase-2 export manifest.
+
+    Each entry becomes one full-frame sample: resident photos have no
+    boxes, so the whole photo is the crop. The export pins the label
+    space its indices refer to; a mismatch with this checkout's enum
+    fails fast instead of silently scrambling labels across devices.
+    """
+    manifest_path = Path(manifest_path)
+    with open(manifest_path) as handle:
+        manifest = json.load(handle)
+    if manifest.get("label_space") != CLASSES:
+        raise ValueError(
+            f"{manifest_path}: label_space {manifest.get('label_space')} "
+            f"does not match this checkout's {CLASSES}; re-export or sync code"
+        )
+    samples = []
+    skipped_missing = 0
+    for entry in manifest.get("samples", []):
+        path = manifest_path.parent / entry["file"]
+        if not path.is_file():
+            skipped_missing += 1
+            continue
+        width, height = _open_image(str(path)).size
+        samples.append(
+            {
+                "image_id": str(entry["image_id"]),
+                "path": str(path),
+                "box": (0.0, 0.0, float(width), float(height)),
+                "label": CLASSES.index(entry["label"]),
+            }
+        )
+        if 0 < limit and len(samples) >= limit:
+            break
+    return samples, skipped_missing
+
+
 def split_by_image(samples, val_fraction, seed):
     """Train/val split grouped by image id: two crops of one photo never
     land on opposite sides, which would leak validation signal."""
     by_image = {}
     for sample in samples:
         by_image.setdefault(sample["image_id"], []).append(sample)
-    ids = sorted(by_image)
+    # TACO ids are ints, export ids are strings; compare as text so mixed
+    # sources split deterministically instead of raising TypeError.
+    ids = sorted(by_image, key=str)
     rng = random.Random(seed)
     rng.shuffle(ids)
     cut = max(int(len(ids) * val_fraction), 1) if len(ids) > 1 else 0
@@ -256,6 +306,19 @@ def main(argv=None) -> int:
     samples, fallbacks, skipped_tiny = load_samples(
         ann_path, data_dir, limit=args.limit
     )
+    phase2_count = 0
+    for manifest_path in args.extra_manifest or []:
+        try:
+            extra, skipped_missing = load_manifest_samples(
+                manifest_path, limit=args.limit
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if skipped_missing:
+            print(f"{manifest_path}: {skipped_missing} entries lack image files")
+        phase2_count += len(extra)
+        samples.extend(extra)
     if not samples:
         print("no usable crops found", file=sys.stderr)
         return 2
@@ -263,7 +326,7 @@ def main(argv=None) -> int:
     device = pick_device(args.device)
     print(
         f"crops: {len(samples)} (train {len(train)}, val {len(val)}, "
-        f"tiny skipped {skipped_tiny}) on {device}"
+        f"tiny skipped {skipped_tiny}, phase2 {phase2_count}) on {device}"
     )
     counts = Counter(CLASSES[s["label"]] for s in samples)
     print("per-class crops:", dict(counts))
@@ -319,6 +382,7 @@ def main(argv=None) -> int:
             "per_class_accuracy": class_acc,
             "class_counts": dict(counts),
             "taco_fallbacks": fallbacks,
+            "phase2_samples": phase2_count,
             "image_size": ai_service.IMAGE_SIZE,
             "trained_at": datetime.now(UTC).isoformat(),
         },
@@ -335,6 +399,7 @@ def main(argv=None) -> int:
                     "per_class_accuracy": class_acc,
                     "class_counts": dict(counts),
                     "taco_fallbacks": fallbacks,
+                    "phase2_samples": phase2_count,
                     "crops": len(samples),
                     "epochs": args.epochs,
                 },

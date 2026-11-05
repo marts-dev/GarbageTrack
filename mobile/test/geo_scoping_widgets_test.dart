@@ -19,6 +19,7 @@ import 'package:garbagetrack/widgets/location_picker.dart';
 import 'package:garbagetrack/widgets/type_dots.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
@@ -703,6 +704,71 @@ void main() {
       expect(submitted?['longitude'], 3.37);
       expect(submitted?['latitude'], 6.45);
       expect(submitted?['types'], ['plastic']);
+    });
+
+    testWidgets('photo consent toggle submits with the report',
+        (tester) async {
+      Map<String, dynamic>? submitted;
+      final bytes = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      );
+      final auth = AuthProvider.withUser(
+        _user('resident', country: 'Nigeria'),
+        client: ApiClient(
+          baseUrl: 'http://x',
+          httpClient: MockClient((request) async {
+            if (request.method == 'GET' &&
+                request.url.path == '/api/v1/users/u1/location') {
+              return http.Response(jsonEncode(_locationJson(3.37, 6.45)), 200);
+            }
+            if (request.method == 'POST' &&
+                request.url.path == '/api/v1/garbage') {
+              submitted = jsonDecode(request.body) as Map<String, dynamic>;
+              return http.Response(
+                  jsonEncode(_postJson('p9', null, 3.37, 6.45)), 201);
+            }
+            return http.Response(jsonEncode({'detail': 'not found'}), 404);
+          }),
+        ),
+      );
+      await tester.pumpWidget(_withAuth(
+        auth,
+        NewPostScreen(
+          tileProvider: _StubTileProvider(),
+          imageProvider: (_) async =>
+              XFile.fromData(bytes, mimeType: 'image/png'),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // No photo, no consent question.
+      expect(
+        find.text('Use this photo to improve sorting'),
+        findsNothing,
+      );
+
+      await _scrollTo(tester, find.text('Gallery'));
+      await tester.tap(find.text('Gallery'));
+      await tester.pumpAndSettle();
+      final toggle =
+          find.widgetWithText(SwitchListTile, 'Use this photo to improve sorting');
+      await _scrollTo(tester, toggle);
+      expect(find.text('Remove photo'), findsOneWidget);
+      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+
+      await tester.tap(toggle);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+
+      await _scrollTo(tester, find.widgetWithText(FilterChip, 'Plastic'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Plastic'));
+      await tester.pumpAndSettle();
+      await _scrollTo(
+          tester, find.widgetWithText(FilledButton, 'Submit report'));
+      await tester.tap(find.widgetWithText(FilledButton, 'Submit report'));
+      await tester.pumpAndSettle();
+      expect(submitted?['training_consent'], isTrue);
+      expect(submitted?['image_base64'], base64Encode(bytes));
     });
 
     testWidgets('report without a collection point prompts setup',
